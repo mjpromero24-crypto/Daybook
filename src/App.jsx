@@ -88,7 +88,7 @@ export default function DailyCompanion() {
   const cardText = getLuminance(cardBg) < 0.45 ? "#F2EDE3" : "#2E2A24";
 
   return (
-    <div className={`min-h-screen flex flex-col ${glossy ? "glossy-mode" : ""}`} style={{ "--accent": accent, "--card-bg": cardBg, "--card-text": cardText, background: bgStyle, color: pageText }}>
+    <div className={`min-h-screen w-full flex flex-col ${glossy ? "glossy-mode" : ""}`} style={{ "--accent": accent, "--card-bg": cardBg, "--card-text": cardText, background: bgStyle, color: pageText }}>
       <header className="border-b border-[#DDD3BD] px-6 py-5 flex items-center justify-between relative" style={{ backgroundColor: glossy ? `color-mix(in srgb, ${headerBg} 55%, transparent)` : headerBg, color: getLuminance(headerBg) < 0.45 ? "#F2EDE3" : "#2E2A24" }}>
         <div>
           {editingName ? (
