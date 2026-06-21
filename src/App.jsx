@@ -885,10 +885,12 @@ function NotesView({ notes, saveNotes }) {
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [showColorPicker, setShowColorPicker] = useState(false);
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const editorRef = useRef(null);
   const manipRef = useRef(null);
+  const savedRangeRef = useRef(null);
   const activeListenersRef = useRef(null);
   const rafRef = useRef(null);
   const pendingRef = useRef(null);
@@ -1204,14 +1206,43 @@ function NotesView({ notes, saveNotes }) {
             <option value="5">Large</option>
             <option value="7">Huge</option>
           </select>
-          <label className="relative w-7 h-7 rounded hover:bg-[#F6F1E7] flex items-center justify-center cursor-pointer" title="Color of the selected text">
-            <span className="text-sm font-medium" style={{ color: "var(--accent)" }}>A</span>
-            <input
-              type="color"
-              onChange={(e) => exec("foreColor", e.target.value)}
-              className="absolute inset-0 opacity-0 cursor-pointer"
-            />
-          </label>
+          <div className="relative">
+            <button
+              onMouseDown={() => {
+                const sel = window.getSelection();
+                if (sel && sel.rangeCount > 0) savedRangeRef.current = sel.getRangeAt(0);
+              }}
+              onClick={() => setShowColorPicker((s) => !s)}
+              className="w-7 h-7 rounded hover:bg-[#F6F1E7] flex items-center justify-center font-medium text-sm"
+              title="Color of the selected text"
+            >
+              <span style={{ color: "var(--accent)" }}>A</span>
+            </button>
+            {showColorPicker && (
+              <div className="absolute left-0 top-full mt-1 bg-white border border-[#DDD3BD] rounded-lg shadow-lg p-2 z-30 grid grid-cols-4 gap-1.5 w-36">
+                {[
+                  "#2E2A24", "#C0392B", "#B85C38", "#D4A017",
+                  "#3F9142", "#2E7D8C", "#4D5FA8", "#8A4F7E",
+                ].map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      const sel = window.getSelection();
+                      if (savedRangeRef.current) {
+                        sel.removeAllRanges();
+                        sel.addRange(savedRangeRef.current);
+                      }
+                      exec("foreColor", c);
+                      setShowColorPicker(false);
+                    }}
+                    style={{ backgroundColor: c }}
+                    className="w-6 h-6 rounded-full border border-[#DDD3BD] active:scale-90 transition-transform"
+                    title={c}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
           <span className="text-xs text-[#8A8071] ml-2">Highlight text first, then pick a style</span>
         </div>
         <p className="text-xs text-[#8A8071] mb-2">Tap a photo on the page to move, resize, or remove it.</p>
@@ -1221,7 +1252,7 @@ function NotesView({ notes, saveNotes }) {
           onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
           onDragLeave={() => setIsDragOver(false)}
           onDrop={handleDrop}
-          onClick={() => setSelectedId(null)}
+          onClick={() => { setSelectedId(null); setShowColorPicker(false); }}
           style={{ height: canvasHeight }}
           className={`relative w-full border-2 rounded-lg mb-3 overflow-hidden transition-colors ${
             isDragOver ? "border-[var(--accent)] border-dashed bg-[#F6F1E7]" : "border-[#DDD3BD] border-dashed bg-white"
