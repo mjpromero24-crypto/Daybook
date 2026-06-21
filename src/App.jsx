@@ -907,8 +907,33 @@ function NotesView({ notes, saveNotes }) {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
   const manipRef = useRef(null);
+  const blockRefs = useRef({});
+  const [dragBlockId, setDragBlockId] = useState(null);
+  const [localBlockOrder, setLocalBlockOrder] = useState([]);
+  const draggingBlockRef = useRef(false);
+  const rafBlockRef = useRef(null);
+  const pendingBlockYRef = useRef(null);
+  const activeBlockListenersRef = useRef(null);
 
   const makeTextBlock = (text = "") => ({ id: `${Date.now()}-${Math.random()}`, type: "text", text });
+
+  useEffect(() => {
+    return () => {
+      draggingBlockRef.current = false;
+      if (rafBlockRef.current) {
+        cancelAnimationFrame(rafBlockRef.current);
+        rafBlockRef.current = null;
+      }
+      if (activeBlockListenersRef.current) {
+        const { move, up } = activeBlockListenersRef.current;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("touchmove", move);
+        window.removeEventListener("touchend", up);
+        activeBlockListenersRef.current = null;
+      }
+    };
+  }, []);
 
   const previewFor = (n) => {
     const firstText = (n.blocks || []).find((b) => b.type === "text" && b.text.trim());
@@ -1036,16 +1061,85 @@ function NotesView({ notes, saveNotes }) {
   // Custom resize handle for image blocks — same proven pointer-drag
   // pattern used for reordering to-do items, so it behaves reliably
   // on both mouse and touch.
-  const moveBlock = (id, direction) => {
-    setDraftBlocks((prev) => {
-      const index = prev.findIndex((b) => b.id === id);
-      const swapIndex = direction === "up" ? index - 1 : index + 1;
-      if (swapIndex < 0 || swapIndex >= prev.length) return prev;
-      const next = [...prev];
-      [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
-      saveActive(next);
+  const computeBlockReorder = (id, y) => {
+    setLocalBlockOrder((prev) => {
+      const currentIndex = prev.indexOf(id);
+      let targetIndex = currentIndex;
+      for (let i = 0; i < prev.length; i++) {
+        const node = blockRefs.current[prev[i]];
+        if (!node) continue;
+        const rect = node.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        if (y < mid) {
+          targetIndex = i;
+          break;
+        }
+        targetIndex = i;
+      }
+      if (targetIndex === currentIndex) return prev;
+      const next = prev.filter((x) => x !== id);
+      next.splice(targetIndex, 0, id);
       return next;
     });
+  };
+
+  const commitBlockReorder = (orderedIds) => {
+    const byId = Object.fromEntries(draftBlocks.map((b) => [b.id, b]));
+    const next = orderedIds.map((id) => byId[id]).filter(Boolean);
+    setDraftBlocks(next);
+    saveActive(next);
+  };
+
+  const startBlockDrag = (id) => {
+    if (draggingBlockRef.current) return;
+    setDragBlockId(id);
+    setLocalBlockOrder(draftBlocks.map((b) => b.id));
+    draggingBlockRef.current = true;
+
+    const scheduleMove = (y) => {
+      pendingBlockYRef.current = y;
+      if (rafBlockRef.current) return;
+      rafBlockRef.current = requestAnimationFrame(() => {
+        rafBlockRef.current = null;
+        if (pendingBlockYRef.current != null) computeBlockReorder(id, pendingBlockYRef.current);
+      });
+    };
+
+    const handleMove = (ev) => {
+      if (!draggingBlockRef.current) return;
+      if (ev.cancelable) ev.preventDefault();
+      const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
+      scheduleMove(y);
+    };
+
+    const handleUp = () => {
+      draggingBlockRef.current = false;
+      if (rafBlockRef.current) {
+        cancelAnimationFrame(rafBlockRef.current);
+        rafBlockRef.current = null;
+      }
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("touchmove", handleMove);
+      window.removeEventListener("touchend", handleUp);
+      activeBlockListenersRef.current = null;
+      setLocalBlockOrder((finalOrder) => {
+        commitBlockReorder(finalOrder);
+        return finalOrder;
+      });
+      setDragBlockId(null);
+    };
+
+    activeBlockListenersRef.current = { move: handleMove, up: handleUp };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("touchmove", handleMove, { passive: false });
+    window.addEventListener("touchend", handleUp);
+  };
+
+  const handleBlockGripDown = (e, id) => {
+    e.preventDefault();
+    startBlockDrag(id);
   };
 
   const startResize = (e, id) => {
@@ -1105,17 +1199,23 @@ function NotesView({ notes, saveNotes }) {
           onDrop={handleDrop}
           className="space-y-2 min-h-[200px] bg-white border border-[#DDD3BD] rounded px-3 py-2 mb-3"
         >
-          {draftBlocks.map((b, i) =>
+          {(dragBlockId ? localBlockOrder.map((id) => draftBlocks.find((b) => b.id === id)).filter(Boolean) : draftBlocks).map((b) =>
             b.type === "text" ? (
-              <AutoTextarea
-                key={b.id}
-                value={b.text}
-                onChange={(text) => updateTextBlock(b.id, text)}
-                onBlur={() => saveActive()}
-                placeholder="Write your note, or drag a photo in…"
-              />
+              <div key={b.id} ref={(node) => { blockRefs.current[b.id] = node; }}>
+                <AutoTextarea
+                  value={b.text}
+                  onChange={(text) => updateTextBlock(b.id, text)}
+                  onBlur={() => saveActive()}
+                  placeholder="Write your note, or drag a photo in…"
+                />
+              </div>
             ) : (
-              <div key={b.id} className="relative inline-block group" style={{ width: b.width }}>
+              <div
+                key={b.id}
+                ref={(node) => { blockRefs.current[b.id] = node; }}
+                className="relative inline-block group no-select"
+                style={{ width: b.width, opacity: dragBlockId === b.id ? 0.5 : 1 }}
+              >
                 <img
                   src={b.src}
                   alt=""
@@ -1130,23 +1230,13 @@ function NotesView({ notes, saveNotes }) {
                 >
                   <X size={12} />
                 </button>
-                <div className="absolute -top-2 left-1/2 -translate-x-1/2 flex gap-0.5">
-                  <button
-                    onClick={() => moveBlock(b.id, "up")}
-                    disabled={i === 0}
-                    className="bg-[#2E2A24] text-white rounded-full p-0.5 shadow disabled:opacity-30"
-                    title="Move up"
-                  >
-                    <ChevronUp size={12} />
-                  </button>
-                  <button
-                    onClick={() => moveBlock(b.id, "down")}
-                    disabled={i === draftBlocks.length - 1}
-                    className="bg-[#2E2A24] text-white rounded-full p-0.5 shadow disabled:opacity-30"
-                    title="Move down"
-                  >
-                    <ChevronDown size={12} />
-                  </button>
+                <div
+                  onPointerDown={(e) => handleBlockGripDown(e, b.id)}
+                  onTouchStart={(e) => handleBlockGripDown(e, b.id)}
+                  className="absolute -top-2 left-1/2 -translate-x-1/2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow cursor-grab active:cursor-grabbing touch-none"
+                  title="Drag to move"
+                >
+                  <GripVertical size={12} />
                 </div>
                 <div
                   onPointerDown={(e) => startResize(e, b.id)}
