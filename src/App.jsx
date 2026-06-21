@@ -1036,6 +1036,18 @@ function NotesView({ notes, saveNotes }) {
   // Custom resize handle for image blocks — same proven pointer-drag
   // pattern used for reordering to-do items, so it behaves reliably
   // on both mouse and touch.
+  const moveBlock = (id, direction) => {
+    setDraftBlocks((prev) => {
+      const index = prev.findIndex((b) => b.id === id);
+      const swapIndex = direction === "up" ? index - 1 : index + 1;
+      if (swapIndex < 0 || swapIndex >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+      saveActive(next);
+      return next;
+    });
+  };
+
   const startResize = (e, id) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1093,7 +1105,7 @@ function NotesView({ notes, saveNotes }) {
           onDrop={handleDrop}
           className="space-y-2 min-h-[200px] bg-white border border-[#DDD3BD] rounded px-3 py-2 mb-3"
         >
-          {draftBlocks.map((b) =>
+          {draftBlocks.map((b, i) =>
             b.type === "text" ? (
               <AutoTextarea
                 key={b.id}
@@ -1113,11 +1125,29 @@ function NotesView({ notes, saveNotes }) {
                 />
                 <button
                   onClick={() => removeBlock(b.id)}
-                  className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow"
                   title="Remove photo"
                 >
                   <X size={12} />
                 </button>
+                <div className="absolute -top-2 left-1/2 -translate-x-1/2 flex gap-0.5">
+                  <button
+                    onClick={() => moveBlock(b.id, "up")}
+                    disabled={i === 0}
+                    className="bg-[#2E2A24] text-white rounded-full p-0.5 shadow disabled:opacity-30"
+                    title="Move up"
+                  >
+                    <ChevronUp size={12} />
+                  </button>
+                  <button
+                    onClick={() => moveBlock(b.id, "down")}
+                    disabled={i === draftBlocks.length - 1}
+                    className="bg-[#2E2A24] text-white rounded-full p-0.5 shadow disabled:opacity-30"
+                    title="Move down"
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                </div>
                 <div
                   onPointerDown={(e) => startResize(e, b.id)}
                   onTouchStart={(e) => startResize(e, b.id)}
