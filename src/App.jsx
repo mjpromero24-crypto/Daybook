@@ -1674,10 +1674,20 @@ function SettingsView({
           </div>
           <button
             onClick={() => saveGlossy(!glossy)}
-            className={`isolate w-12 h-7 rounded-full relative transition-colors shrink-0 ${glossy ? "bg-[var(--accent)]" : "bg-[#DDD3BD]"}`}
-            style={{ transform: "translateZ(0)" }}
+            style={{ backgroundColor: glossy ? "var(--accent)" : "#DDD3BD" }}
+            className="w-12 h-7 rounded-full relative shrink-0 transition-colors"
           >
-            <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${glossy ? "translate-x-5" : "translate-x-0.5"}`} />
+            <span
+              style={{
+                position: "absolute",
+                top: "2px",
+                left: glossy ? "22px" : "2px",
+                width: "20px",
+                height: "20px",
+                transition: "left 0.2s ease",
+              }}
+              className="bg-white rounded-full shadow"
+            />
           </button>
         </div>
       </Card>
