@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Calendar as CalendarIcon, CheckSquare, FileText, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, X, ListTodo, Briefcase, Home, Pencil, Check, Palette, Settings as SettingsIcon, GripVertical } from "lucide-react";
+import { Calendar as CalendarIcon, CheckSquare, FileText, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, X, ListTodo, Briefcase, Home, Pencil, Check, Palette, Settings as SettingsIcon, GripVertical, Image as ImageIcon } from "lucide-react";
 
 const ACCENTS = [
   { name: "Terracotta", value: "#A9684F" },
@@ -870,27 +870,88 @@ function NotesView({ notes, saveNotes }) {
   const [active, setActive] = useState(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
+  const [draftImages, setDraftImages] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   const openNote = (n) => {
     setActive(n.id);
     setDraftTitle(n.title);
     setDraftBody(n.body);
+    setDraftImages(n.images || []);
   };
 
   const newNote = async () => {
-    const n = { id: Date.now().toString(), title: "Untitled", body: "", updated: Date.now() };
+    const n = { id: Date.now().toString(), title: "Untitled", body: "", images: [], updated: Date.now() };
     await saveNotes([n, ...notes]);
     openNote(n);
   };
 
-  const saveActive = async () => {
-    const next = notes.map((n) => (n.id === active ? { ...n, title: draftTitle || "Untitled", body: draftBody, updated: Date.now() } : n));
+  const saveActive = async (images = draftImages) => {
+    const next = notes.map((n) =>
+      n.id === active ? { ...n, title: draftTitle || "Untitled", body: draftBody, images, updated: Date.now() } : n
+    );
     await saveNotes(next);
   };
 
   const removeNote = async (id) => {
     await saveNotes(notes.filter((n) => n.id !== id));
     if (active === id) setActive(null);
+  };
+
+  // Resize/compress the image before storing, so photos don't blow up local storage
+  const compressImage = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1000;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", 0.75));
+        };
+        img.onerror = reject;
+        img.src = reader.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const handleAddImage = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const compressed = await Promise.all(files.map(compressImage));
+      const nextImages = [...draftImages, ...compressed];
+      setDraftImages(nextImages);
+      await saveActive(nextImages);
+    } catch (err) {
+      console.error("Image upload error:", err);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const removeImage = async (index) => {
+    const nextImages = draftImages.filter((_, i) => i !== index);
+    setDraftImages(nextImages);
+    await saveActive(nextImages);
   };
 
   if (active) {
@@ -900,7 +961,7 @@ function NotesView({ notes, saveNotes }) {
           <input
             value={draftTitle}
             onChange={(e) => setDraftTitle(e.target.value)}
-            onBlur={saveActive}
+            onBlur={() => saveActive()}
             className="text-lg font-medium bg-transparent outline-none flex-1"
             style={{ fontFamily: "Georgia, serif" }}
           />
@@ -911,11 +972,45 @@ function NotesView({ notes, saveNotes }) {
         <textarea
           value={draftBody}
           onChange={(e) => setDraftBody(e.target.value)}
-          onBlur={saveActive}
+          onBlur={() => saveActive()}
           placeholder="Write your note…"
-          rows={14}
-          className="w-full bg-white border border-[#DDD3BD] rounded px-3 py-2 text-sm outline-none focus:border-[var(--accent)] resize-none"
+          rows={10}
+          className="w-full bg-white border border-[#DDD3BD] rounded px-3 py-2 text-sm outline-none focus:border-[var(--accent)] resize-none mb-3"
         />
+
+        {draftImages.length > 0 && (
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            {draftImages.map((src, i) => (
+              <div key={i} className="relative group">
+                <img src={src} alt="" className="w-full aspect-square object-cover rounded border border-[#DDD3BD]" />
+                <button
+                  onClick={() => removeImage(i)}
+                  className="absolute -top-1.5 -right-1.5 bg-[#2E2A24] text-white rounded-full p-0.5 shadow"
+                  title="Remove photo"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleAddImage}
+          className="hidden"
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1.5 text-sm text-[#8A8071] hover:text-[var(--accent)] border border-dashed border-[#DDD3BD] rounded-lg px-3 py-2 w-full justify-center transition-colors disabled:opacity-50"
+        >
+          <ImageIcon size={15} />
+          {uploading ? "Adding photo…" : "Add a photo"}
+        </button>
       </Card>
     );
   }
@@ -930,11 +1025,16 @@ function NotesView({ notes, saveNotes }) {
       ) : (
         notes.map((n) => (
           <Card key={n.id} className="p-3 flex items-center justify-between cursor-pointer hover:border-[var(--accent)]" >
-            <div onClick={() => openNote(n)} className="flex-1">
-              <p className="text-sm font-medium">{n.title}</p>
-              <p className="text-xs text-[#8A8071] truncate">{n.body || "Empty note"}</p>
+            <div onClick={() => openNote(n)} className="flex-1 flex items-center gap-3 min-w-0">
+              {n.images && n.images.length > 0 && (
+                <img src={n.images[0]} alt="" className="w-10 h-10 rounded object-cover shrink-0 border border-[#DDD3BD]" />
+              )}
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{n.title}</p>
+                <p className="text-xs text-[#8A8071] truncate">{n.body || "Empty note"}</p>
+              </div>
             </div>
-            <button onClick={() => removeNote(n.id)} className="text-[#8A8071] hover:text-[var(--accent)] ml-2">
+            <button onClick={() => removeNote(n.id)} className="text-[#8A8071] hover:text-[var(--accent)] ml-2 shrink-0">
               <Trash2 size={14} />
             </button>
           </Card>
