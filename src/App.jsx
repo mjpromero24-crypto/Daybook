@@ -287,10 +287,15 @@ function CalendarView({ events, saveEvents }) {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowPicker((s) => !s)}
-              className="font-medium px-2 py-1 rounded hover:bg-[#EDE6D6] transition-colors"
+              className="font-medium px-2 py-1 rounded hover:bg-[#EDE6D6] transition-colors flex items-center gap-1"
               style={{ fontFamily: "Georgia, serif" }}
             >
               {monthNames[month]} {year}
+              <ChevronDown
+                size={15}
+                className="transition-transform duration-300"
+                style={{ transform: showPicker ? "rotate(180deg)" : "rotate(0deg)" }}
+              />
             </button>
             <button
               onClick={() => {
@@ -310,34 +315,41 @@ function CalendarView({ events, saveEvents }) {
           </button>
         </div>
 
-        {showPicker && (
-          <div className="flex gap-2 mb-4 p-3 bg-[#F6F1E7] rounded-lg">
-            <select
-              value={month}
-              onChange={(e) => setCursor(new Date(year, Number(e.target.value), 1))}
-              className="flex-1 bg-white border border-[#DDD3BD] rounded px-2 py-2 text-sm outline-none focus:border-[var(--accent)]"
-            >
+        <div
+          className="overflow-hidden transition-all duration-300 ease-out"
+          style={{ maxHeight: showPicker ? 180 : 0, opacity: showPicker ? 1 : 0, marginBottom: showPicker ? 16 : 0 }}
+        >
+          <div className="bg-[#F6F1E7] rounded-lg p-3">
+            <div className="flex gap-1.5 overflow-x-auto pb-2 snap-x" style={{ scrollbarWidth: "none" }}>
               {monthNames.map((m, i) => (
-                <option key={m} value={i}>{m}</option>
+                <button
+                  key={m}
+                  onClick={() => setCursor(new Date(year, i, 1))}
+                  style={i === month ? { backgroundColor: "var(--accent)" } : {}}
+                  className={`shrink-0 snap-start px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-200 ${
+                    i === month ? "text-white scale-105" : "bg-white text-[#2E2A24] hover:bg-[#EDE6D6]"
+                  }`}
+                >
+                  {m.slice(0, 3)}
+                </button>
               ))}
-            </select>
-            <select
-              value={year}
-              onChange={(e) => setCursor(new Date(Number(e.target.value), month, 1))}
-              className="w-28 bg-white border border-[#DDD3BD] rounded px-2 py-2 text-sm outline-none focus:border-[var(--accent)]"
-            >
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pt-1 snap-x" style={{ scrollbarWidth: "none" }}>
               {Array.from({ length: 21 }, (_, i) => year - 10 + i).map((y) => (
-                <option key={y} value={y}>{y}</option>
+                <button
+                  key={y}
+                  onClick={() => setCursor(new Date(y, month, 1))}
+                  style={y === year ? { backgroundColor: "var(--accent)" } : {}}
+                  className={`shrink-0 snap-start px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-200 ${
+                    y === year ? "text-white scale-105" : "bg-white text-[#2E2A24] hover:bg-[#EDE6D6]"
+                  }`}
+                >
+                  {y}
+                </button>
               ))}
-            </select>
-            <button
-              onClick={() => setShowPicker(false)}
-              className="px-3 py-2 text-sm text-[#8A8071] hover:text-[var(--accent)]"
-            >
-              Done
-            </button>
+            </div>
           </div>
-        )}
+        </div>
 
         <div className="grid grid-cols-7 gap-1 text-center text-xs text-[#8A8071] mb-1">
           {dayNames.map((d, i) => <div key={i}>{d}</div>)}
