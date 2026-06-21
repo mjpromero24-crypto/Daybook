@@ -253,9 +253,13 @@ export default function DailyCompanion() {
 }
 
 function Card({ children, className = "", bgImage = null, noGlass = false }) {
+  // The glossy CSS rule uses !important to force its own background, which
+  // would hide a custom photo background — so skip that class whenever a
+  // photo is set, regardless of the noGlass flag.
+  const useGlass = !noGlass && !bgImage;
   return (
     <div
-      className={`${noGlass ? "" : "glass-card"} border border-[#DDD3BD] rounded-lg relative ${className}`}
+      className={`${useGlass ? "glass-card" : ""} border border-[#DDD3BD] rounded-lg relative ${className}`}
       style={
         bgImage
           ? { backgroundImage: `url(${bgImage})`, backgroundSize: "cover", backgroundPosition: "center", color: "var(--card-text)" }
