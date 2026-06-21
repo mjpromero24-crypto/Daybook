@@ -445,38 +445,59 @@ function TodoView({ todos, saveTodos }) {
     await saveTodos(next);
   };
 
-  const handlePointerDown = (e, id) => {
-    e.preventDefault();
+  const rafRef = useRef(null);
+  const pendingYRef = useRef(null);
+  const longPressTimerRef = useRef(null);
+
+  const computeReorder = (id, y) => {
+    setLocalOrder((prev) => {
+      const currentIndex = prev.indexOf(id);
+      let targetIndex = currentIndex;
+      for (let i = 0; i < prev.length; i++) {
+        const node = itemRefs.current[prev[i]];
+        if (!node) continue;
+        const rect = node.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        if (y < mid) {
+          targetIndex = i;
+          break;
+        }
+        targetIndex = i;
+      }
+      if (targetIndex === currentIndex) return prev;
+      const next = prev.filter((x) => x !== id);
+      next.splice(targetIndex, 0, id);
+      return next;
+    });
+  };
+
+  const beginDrag = (id) => {
     setDragId(id);
     setLocalOrder(sortedFiltered.map((t) => t.id));
     draggingRef.current = true;
 
+    const scheduleMove = (y) => {
+      pendingYRef.current = y;
+      if (rafRef.current) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        if (pendingYRef.current != null) computeReorder(id, pendingYRef.current);
+      });
+    };
+
     const handleMove = (ev) => {
       if (!draggingRef.current) return;
+      if (ev.cancelable) ev.preventDefault();
       const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
-      setLocalOrder((prev) => {
-        const currentIndex = prev.indexOf(id);
-        let targetIndex = currentIndex;
-        for (let i = 0; i < prev.length; i++) {
-          const node = itemRefs.current[prev[i]];
-          if (!node) continue;
-          const rect = node.getBoundingClientRect();
-          const mid = rect.top + rect.height / 2;
-          if (y < mid) {
-            targetIndex = i;
-            break;
-          }
-          targetIndex = i;
-        }
-        if (targetIndex === currentIndex) return prev;
-        const next = prev.filter((x) => x !== id);
-        next.splice(targetIndex, 0, id);
-        return next;
-      });
+      scheduleMove(y);
     };
 
     const handleUp = () => {
       draggingRef.current = false;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
       window.removeEventListener("touchmove", handleMove);
@@ -492,6 +513,27 @@ function TodoView({ todos, saveTodos }) {
     window.addEventListener("pointerup", handleUp);
     window.addEventListener("touchmove", handleMove, { passive: false });
     window.addEventListener("touchend", handleUp);
+  };
+
+  // Drag immediately from the grip handle
+  const handleGripPointerDown = (e, id) => {
+    e.preventDefault();
+    beginDrag(id);
+  };
+
+  // Long-press anywhere else on the row to start dragging
+  const handleRowPointerDown = (e, id) => {
+    if (e.target.closest("[data-no-drag]")) return;
+    longPressTimerRef.current = setTimeout(() => {
+      beginDrag(id);
+    }, 280);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
   };
 
   return (
@@ -552,18 +594,26 @@ function TodoView({ todos, saveTodos }) {
                   key={id}
                   ref={(node) => { itemRefs.current[id] = node; }}
                   style={{ backgroundColor: activeCat.bg, opacity: isDragging ? 0.6 : 1 }}
-                  className="flex items-center justify-between rounded px-2 py-2 transition-colors no-select"
+                  className={`flex items-center justify-between rounded px-2 py-2 no-select ${isDragging ? "" : "transition-colors"}`}
+                  onPointerDown={(e) => handleRowPointerDown(e, id)}
+                  onTouchStart={(e) => handleRowPointerDown(e, id)}
+                  onPointerUp={cancelLongPress}
+                  onPointerLeave={cancelLongPress}
+                  onTouchEnd={cancelLongPress}
+                  onTouchMove={cancelLongPress}
                 >
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <button
-                      onPointerDown={(e) => handlePointerDown(e, id)}
-                      onTouchStart={(e) => handlePointerDown(e, id)}
+                      data-no-drag
+                      onPointerDown={(e) => handleGripPointerDown(e, id)}
+                      onTouchStart={(e) => handleGripPointerDown(e, id)}
                       className="text-[#B9AF9A] hover:text-[#8A8071] cursor-grab active:cursor-grabbing shrink-0 touch-none no-select"
                       title="Drag to reorder"
                     >
                       <GripVertical size={16} />
                     </button>
                     <button
+                      data-no-drag
                       onClick={() => toggleDone(t.id)}
                       style={t.done ? { backgroundColor: activeCat.color, borderColor: activeCat.color } : { borderColor: "#C7BCA3" }}
                       className="w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors"
@@ -572,6 +622,7 @@ function TodoView({ todos, saveTodos }) {
                     </button>
                     {editingId === t.id ? (
                       <input
+                        data-no-drag
                         autoFocus
                         value={editText}
                         onChange={(e) => setEditText(e.target.value)}
@@ -584,6 +635,7 @@ function TodoView({ todos, saveTodos }) {
                       />
                     ) : (
                       <span
+                        data-no-drag
                         onClick={() => startEdit(t)}
                         className={`text-sm transition-colors truncate cursor-text ${t.done ? "line-through text-[#8A8071]" : ""}`}
                       >
@@ -591,7 +643,7 @@ function TodoView({ todos, saveTodos }) {
                       </span>
                     )}
                   </div>
-                  <button onClick={() => removeTodo(t.id)} className="text-[#8A8071] hover:text-[var(--accent)] transition-colors p-1 shrink-0">
+                  <button data-no-drag onClick={() => removeTodo(t.id)} className="text-[#8A8071] hover:text-[var(--accent)] transition-colors p-1 shrink-0">
                     <Trash2 size={14} />
                   </button>
                 </div>
