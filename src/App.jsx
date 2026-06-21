@@ -23,6 +23,29 @@ const idToNotificationId = (id) => {
   return Math.abs(hash);
 };
 
+// A dedicated high-priority channel makes the reminder ring loudly and pop
+// up over the lock screen, instead of behaving like a quiet notification.
+// This is the closest Capacitor gets to true alarm-clock behavior without
+// custom native Android code.
+let channelReady = false;
+async function ensureAlarmChannel() {
+  if (channelReady || !remindersSupported()) return;
+  try {
+    await LocalNotifications.createChannel({
+      id: "alarm-style",
+      name: "Reminders",
+      description: "Loud, high-priority event reminders",
+      importance: 5, // max importance — heads-up + sound, even over lock screen
+      visibility: 1,
+      sound: "default",
+      vibration: true,
+    });
+    channelReady = true;
+  } catch (err) {
+    console.error("Channel creation error:", err);
+  }
+}
+
 async function scheduleEventReminder(dateKey, time, title, body, notifId) {
   if (!remindersSupported() || !time) return;
   try {
@@ -31,12 +54,20 @@ async function scheduleEventReminder(dateKey, time, title, body, notifId) {
       const req = await LocalNotifications.requestPermissions();
       if (req.display !== "granted") return;
     }
+    await ensureAlarmChannel();
     const [hh, mm] = time.split(":").map(Number);
     const [yyyy, mo, dd] = dateKey.split("-").map(Number);
     const at = new Date(yyyy, mo - 1, dd, hh, mm, 0);
     if (at.getTime() <= Date.now()) return; // don't schedule something already in the past
     await LocalNotifications.schedule({
-      notifications: [{ id: notifId, title, body, schedule: { at } }],
+      notifications: [{
+        id: notifId,
+        title,
+        body,
+        schedule: { at, allowWhileIdle: true },
+        channelId: "alarm-style",
+        sound: "default",
+      }],
     });
   } catch (err) {
     console.error("Reminder schedule error:", err);
