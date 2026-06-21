@@ -1,5 +1,56 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Calendar as CalendarIcon, CheckSquare, FileText, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, X, ListTodo, Briefcase, Home, Pencil, Check, Palette, Settings as SettingsIcon, GripVertical, Image as ImageIcon } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
+import { LocalNotifications } from "@capacitor/local-notifications";
+
+// Reminders only work inside the installed Android app (Capacitor),
+// never inside a regular mobile/desktop browser tab.
+const remindersSupported = () => {
+  try {
+    return Capacitor.isNativePlatform();
+  } catch {
+    return false;
+  }
+};
+
+// Turns an event's id (a string) into a stable 32-bit integer, since
+// the native notification system requires numeric IDs.
+const idToNotificationId = (id) => {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+};
+
+async function scheduleEventReminder(dateKey, time, title, body, notifId) {
+  if (!remindersSupported() || !time) return;
+  try {
+    const perm = await LocalNotifications.checkPermissions();
+    if (perm.display !== "granted") {
+      const req = await LocalNotifications.requestPermissions();
+      if (req.display !== "granted") return;
+    }
+    const [hh, mm] = time.split(":").map(Number);
+    const [yyyy, mo, dd] = dateKey.split("-").map(Number);
+    const at = new Date(yyyy, mo - 1, dd, hh, mm, 0);
+    if (at.getTime() <= Date.now()) return; // don't schedule something already in the past
+    await LocalNotifications.schedule({
+      notifications: [{ id: notifId, title, body, schedule: { at } }],
+    });
+  } catch (err) {
+    console.error("Reminder schedule error:", err);
+  }
+}
+
+async function cancelEventReminder(notifId) {
+  if (!remindersSupported()) return;
+  try {
+    await LocalNotifications.cancel({ notifications: [{ id: notifId }] });
+  } catch (err) {
+    console.error("Reminder cancel error:", err);
+  }
+}
 
 const ACCENTS = [
   { name: "Terracotta", value: "#A9684F" },
@@ -73,6 +124,14 @@ function useStore(key, fallback) {
 
 export default function DailyCompanion() {
   const [tab, setTab] = useState("calendar");
+
+  useEffect(() => {
+    if (remindersSupported()) {
+      LocalNotifications.requestPermissions().catch((err) =>
+        console.error("Notification permission request error:", err)
+      );
+    }
+  }, []);
   const [events, saveEvents, eventsLoaded] = useStore("companion:events", {});
   const [todos, saveTodos, todosLoaded] = useStore("companion:todos", []);
   const [habits, saveHabits, habitsLoaded] = useStore("companion:habits", []);
@@ -300,9 +359,13 @@ function CalendarView({ events, saveEvents, bgImage }) {
   const addEvent = async () => {
     if (!draft.trim()) return;
     const list = events[selected] || [];
-    const next = [...list, { id: Date.now().toString(), text: draft.trim(), time: draftTime }];
+    const id = Date.now().toString();
+    const next = [...list, { id, text: draft.trim(), time: draftTime }];
     next.sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
     await saveEvents({ ...events, [selected]: next });
+    if (draftTime) {
+      scheduleEventReminder(selected, draftTime, "📅 Reminder", draft.trim(), idToNotificationId(id));
+    }
     setDraft("");
     setDraftTime("");
   };
@@ -312,6 +375,7 @@ function CalendarView({ events, saveEvents, bgImage }) {
     const next = { ...events, [selected]: list };
     if (list.length === 0) delete next[selected];
     await saveEvents(next);
+    cancelEventReminder(idToNotificationId(id));
   };
 
   const [pickerView, setPickerView] = useState("days"); // 'days' | 'months' | 'years'
