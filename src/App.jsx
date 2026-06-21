@@ -1531,7 +1531,7 @@ function SettingsView({
               </button>
               <button
                 onClick={() => saveBgImage(null)}
-                className="text-sm text-[#8A8071] hover:text-[var(--accent)] border border-[#DDD3BD] rounded-lg px-3 py-2"
+                className="text-sm bg-white text-[#2E2A24] hover:text-[var(--accent)] border border-[#DDD3BD] rounded-lg px-3 py-2"
               >
                 Remove
               </button>
@@ -1618,7 +1618,7 @@ function SettingsView({
               </button>
               <button
                 onClick={() => saveCalendarBgImage(null)}
-                className="text-sm text-[#8A8071] hover:text-[var(--accent)] border border-[#DDD3BD] rounded-lg px-3 py-2"
+                className="text-sm bg-white text-[#2E2A24] hover:text-[var(--accent)] border border-[#DDD3BD] rounded-lg px-3 py-2"
               >
                 Remove
               </button>
