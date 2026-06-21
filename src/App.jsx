@@ -1206,6 +1206,20 @@ function NotesView({ notes, saveNotes }) {
             <option value="5">Large</option>
             <option value="7">Huge</option>
           </select>
+          <select
+            onChange={(e) => { if (e.target.value) exec("fontName", e.target.value); e.target.value = ""; }}
+            defaultValue=""
+            className="text-xs bg-white border border-[#DDD3BD] rounded px-1.5 py-1 outline-none h-7 w-24"
+            title="Font of the selected text"
+          >
+            <option value="" disabled>Font</option>
+            <option value="Arial" style={{ fontFamily: "Arial" }}>Arial</option>
+            <option value="Georgia" style={{ fontFamily: "Georgia" }}>Georgia</option>
+            <option value="Times New Roman" style={{ fontFamily: "Times New Roman" }}>Times New Roman</option>
+            <option value="Courier New" style={{ fontFamily: "Courier New" }}>Courier New</option>
+            <option value="Verdana" style={{ fontFamily: "Verdana" }}>Verdana</option>
+            <option value="Comic Sans MS" style={{ fontFamily: "Comic Sans MS" }}>Comic Sans</option>
+          </select>
           <div className="relative">
             <button
               onMouseDown={() => {
