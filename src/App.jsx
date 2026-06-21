@@ -1674,7 +1674,8 @@ function SettingsView({
           </div>
           <button
             onClick={() => saveGlossy(!glossy)}
-            className={`w-12 h-7 rounded-full relative transition-colors shrink-0 ${glossy ? "bg-[var(--accent)]" : "bg-[#DDD3BD]"}`}
+            className={`isolate w-12 h-7 rounded-full relative transition-colors shrink-0 ${glossy ? "bg-[var(--accent)]" : "bg-[#DDD3BD]"}`}
+            style={{ transform: "translateZ(0)" }}
           >
             <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${glossy ? "translate-x-5" : "translate-x-0.5"}`} />
           </button>
