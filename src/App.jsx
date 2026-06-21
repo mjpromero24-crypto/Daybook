@@ -241,10 +241,10 @@ export default function DailyCompanion() {
   );
 }
 
-function Card({ children, className = "", bgImage = null }) {
+function Card({ children, className = "", bgImage = null, noGlass = false }) {
   return (
     <div
-      className={`glass-card border border-[#DDD3BD] rounded-lg relative ${className}`}
+      className={`${noGlass ? "" : "glass-card"} border border-[#DDD3BD] rounded-lg relative ${className}`}
       style={
         bgImage
           ? { backgroundImage: `url(${bgImage})`, backgroundSize: "cover", backgroundPosition: "center", color: "var(--card-text)" }
@@ -1490,7 +1490,7 @@ function SettingsView({
 
   return (
     <div className="space-y-5">
-      <Card className="p-4">
+      <Card className="p-4" noGlass>
         <p className="text-sm font-medium mb-1 flex items-center gap-2">
           <Palette size={15} /> Accent color
         </p>
@@ -1514,7 +1514,7 @@ function SettingsView({
         </div>
       </Card>
 
-      <Card className="p-4">
+      <Card className="p-4" noGlass>
         <p className="text-sm font-medium mb-1">Page background</p>
         <p className="text-xs text-[#8A8071] mb-3">Use your own photo as the background, or pick colors for a solid fill or gradient.</p>
 
@@ -1573,7 +1573,7 @@ function SettingsView({
         </div>
       </Card>
 
-      <Card className="p-4">
+      <Card className="p-4" noGlass>
         <p className="text-sm font-medium mb-1">Sections</p>
         <p className="text-xs text-[#8A8071] mb-3">Color the header, the content boxes (calendar, to-do, notes…), and the tab bar separately.</p>
         <div className="space-y-3">
@@ -1601,7 +1601,7 @@ function SettingsView({
         </div>
       </Card>
 
-      <Card className="p-4">
+      <Card className="p-4" noGlass>
         <p className="text-sm font-medium mb-1">Calendar background</p>
         <p className="text-xs text-[#8A8071] mb-3">Give just the Calendar tab its own background photo.</p>
 
@@ -1637,7 +1637,7 @@ function SettingsView({
         <input ref={calendarBgFileInputRef} type="file" accept="image/*" onChange={handleCalendarBgUpload} className="hidden" />
       </Card>
 
-      <Card className="p-4">
+      <Card className="p-4" noGlass>
         <p className="text-sm font-medium mb-1">Text color</p>
         <p className="text-xs text-[#8A8071] mb-3">Auto picks light or dark text to stay readable against the page background.</p>
         <div className="flex gap-2 mb-3">
@@ -1666,7 +1666,7 @@ function SettingsView({
         )}
       </Card>
 
-      <Card className="p-4">
+      <Card className="p-4" noGlass>
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium">Glossy mode</p>
