@@ -877,89 +877,71 @@ function TrackerView({ habits, saveHabits }) {
   );
 }
 
-function AutoTextarea({ value, onChange, onBlur, placeholder }) {
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (ref.current) {
-      ref.current.style.height = "auto";
-      ref.current.style.height = ref.current.scrollHeight + "px";
-    }
-  }, [value]);
-
-  return (
-    <textarea
-      ref={ref}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={onBlur}
-      placeholder={placeholder}
-      rows={1}
-      className="w-full bg-transparent outline-none text-sm resize-none overflow-hidden leading-relaxed"
-    />
-  );
-}
-
 function NotesView({ notes, saveNotes }) {
   const [active, setActive] = useState(null);
   const [draftTitle, setDraftTitle] = useState("");
-  const [draftBlocks, setDraftBlocks] = useState([]);
+  const [draftText, setDraftText] = useState("");
+  const [draftImages, setDraftImages] = useState([]); // [{id, src, x, y, width, height, front, aspect}]
   const [uploading, setUploading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
+  const canvasRef = useRef(null);
   const manipRef = useRef(null);
-  const blockRefs = useRef({});
-  const [dragBlockId, setDragBlockId] = useState(null);
-  const [localBlockOrder, setLocalBlockOrder] = useState([]);
-  const draggingBlockRef = useRef(false);
-  const rafBlockRef = useRef(null);
-  const pendingBlockYRef = useRef(null);
-  const activeBlockListenersRef = useRef(null);
+  const activeListenersRef = useRef(null);
 
-  const makeTextBlock = (text = "") => ({ id: `${Date.now()}-${Math.random()}`, type: "text", text });
+  // Migrate from older note shapes (blocks-based, or plain body) into the
+  // new { text, images[] } shape used by the freeform canvas.
+  const normalizeNote = (n) => {
+    if (n.images && n.text !== undefined) return n;
+    if (n.blocks) {
+      const text = n.blocks.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+      const images = n.blocks
+        .filter((b) => b.type === "image")
+        .map((b, i) => ({
+          id: b.id,
+          src: b.src,
+          x: 12 + i * 16,
+          y: 12 + i * 16,
+          width: b.width || 220,
+          height: b.height || Math.round((b.width || 220) / (b.aspect || 1)),
+          front: true,
+          aspect: b.aspect || (b.width && b.height ? b.width / b.height : 1),
+        }));
+      return { ...n, text, images };
+    }
+    return { ...n, text: n.body || "", images: [] };
+  };
 
   useEffect(() => {
     return () => {
-      draggingBlockRef.current = false;
-      if (rafBlockRef.current) {
-        cancelAnimationFrame(rafBlockRef.current);
-        rafBlockRef.current = null;
-      }
-      if (activeBlockListenersRef.current) {
-        const { move, up } = activeBlockListenersRef.current;
+      if (activeListenersRef.current) {
+        const { move, up } = activeListenersRef.current;
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
         window.removeEventListener("touchmove", move);
         window.removeEventListener("touchend", up);
-        activeBlockListenersRef.current = null;
+        activeListenersRef.current = null;
       }
     };
   }, []);
 
-  const previewFor = (n) => {
-    const firstText = (n.blocks || []).find((b) => b.type === "text" && b.text.trim());
-    return firstText ? firstText.text : (n.body || "Empty note");
-  };
-
-  const thumbFor = (n) => {
-    const firstImg = (n.blocks || []).find((b) => b.type === "image");
-    return firstImg ? firstImg.src : null;
-  };
-
   const openNote = (n) => {
+    const norm = normalizeNote(n);
     setActive(n.id);
-    setDraftTitle(n.title);
-    setDraftBlocks(n.blocks && n.blocks.length ? n.blocks : [makeTextBlock(n.body || "")]);
+    setDraftTitle(norm.title);
+    setDraftText(norm.text);
+    setDraftImages(norm.images);
   };
 
   const newNote = async () => {
-    const n = { id: Date.now().toString(), title: "Untitled", blocks: [makeTextBlock("")], updated: Date.now() };
+    const n = { id: Date.now().toString(), title: "Untitled", text: "", images: [], updated: Date.now() };
     await saveNotes([n, ...notes]);
     openNote(n);
   };
 
-  const saveActive = async (blocks = draftBlocks, title = draftTitle) => {
+  const saveActive = async (images = draftImages, text = draftText, title = draftTitle) => {
     const next = notes.map((n) =>
-      n.id === active ? { ...n, title: title || "Untitled", blocks, updated: Date.now() } : n
+      n.id === active ? { ...n, title: title || "Untitled", text, body: text, images, updated: Date.now() } : n
     );
     await saveNotes(next);
   };
@@ -967,10 +949,6 @@ function NotesView({ notes, saveNotes }) {
   const removeNote = async (id) => {
     await saveNotes(notes.filter((n) => n.id !== id));
     if (active === id) setActive(null);
-  };
-
-  const updateTextBlock = (id, text) => {
-    setDraftBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, text } : b)));
   };
 
   const compressImage = (file) =>
@@ -1004,17 +982,22 @@ function NotesView({ notes, saveNotes }) {
       reader.readAsDataURL(file);
     });
 
-  // Photos are always added after the last block, with a fresh empty text
-  // block placed after so the person can keep typing below it.
-  const addImageBlocks = (results) => {
-    setDraftBlocks((prev) => {
-      let next = [...prev];
-      results.forEach((r) => {
-        const w = 220;
-        const h = Math.round(w / r.aspect);
-        next.push({ id: `${Date.now()}-${Math.random()}`, type: "image", src: r.src, width: w, height: h, aspect: r.aspect });
+  const addImages = (results, dropPoint) => {
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+    const baseWidth = 180;
+    setDraftImages((prev) => {
+      const next = [...prev];
+      results.forEach((r, i) => {
+        const w = baseWidth;
+        const h = Math.round(baseWidth / r.aspect);
+        let x = 16 + i * 20;
+        let y = 16 + i * 20;
+        if (dropPoint && canvasRect) {
+          x = Math.max(0, Math.min(dropPoint.x - canvasRect.left - w / 2, canvasRect.width - w));
+          y = Math.max(0, dropPoint.y - canvasRect.top - h / 2);
+        }
+        next.push({ id: `${Date.now()}-${i}-${Math.random()}`, src: r.src, x, y, width: w, height: h, front: true, aspect: r.aspect });
       });
-      next.push(makeTextBlock(""));
       saveActive(next);
       return next;
     });
@@ -1026,7 +1009,7 @@ function NotesView({ notes, saveNotes }) {
     setUploading(true);
     try {
       const compressed = await Promise.all(files.map(compressImage));
-      addImageBlocks(compressed);
+      addImages(compressed);
     } catch (err) {
       console.error("Image insert error:", err);
     } finally {
@@ -1037,12 +1020,13 @@ function NotesView({ notes, saveNotes }) {
 
   const handleDrop = async (e) => {
     e.preventDefault();
+    setIsDragOver(false);
     const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith("image/"));
     if (files.length === 0) return;
     setUploading(true);
     try {
       const compressed = await Promise.all(files.map(compressImage));
-      addImageBlocks(compressed);
+      addImages(compressed, { x: e.clientX, y: e.clientY });
     } catch (err) {
       console.error("Image drop error:", err);
     } finally {
@@ -1050,114 +1034,60 @@ function NotesView({ notes, saveNotes }) {
     }
   };
 
-  const removeBlock = (id) => {
-    setDraftBlocks((prev) => {
-      const next = prev.filter((b) => b.id !== id);
+  const removeImage = (id) => {
+    setDraftImages((prev) => {
+      const next = prev.filter((im) => im.id !== id);
       saveActive(next);
       return next;
     });
   };
 
-  // Custom resize handle for image blocks — same proven pointer-drag
-  // pattern used for reordering to-do items, so it behaves reliably
-  // on both mouse and touch.
-  const computeBlockReorder = (id, y) => {
-    setLocalBlockOrder((prev) => {
-      const currentIndex = prev.indexOf(id);
-      let targetIndex = currentIndex;
-      for (let i = 0; i < prev.length; i++) {
-        const node = blockRefs.current[prev[i]];
-        if (!node) continue;
-        const rect = node.getBoundingClientRect();
-        const mid = rect.top + rect.height / 2;
-        if (y < mid) {
-          targetIndex = i;
-          break;
-        }
-        targetIndex = i;
-      }
-      if (targetIndex === currentIndex) return prev;
-      const next = prev.filter((x) => x !== id);
-      next.splice(targetIndex, 0, id);
+  const setFront = (id, front) => {
+    setDraftImages((prev) => {
+      const next = prev.map((im) => (im.id === id ? { ...im, front } : im));
+      saveActive(next);
       return next;
     });
   };
 
-  const commitBlockReorder = (orderedIds) => {
-    const byId = Object.fromEntries(draftBlocks.map((b) => [b.id, b]));
-    const next = orderedIds.map((id) => byId[id]).filter(Boolean);
-    setDraftBlocks(next);
-    saveActive(next);
-  };
-
-  const startBlockDrag = (id) => {
-    if (draggingBlockRef.current) return;
-    setDragBlockId(id);
-    setLocalBlockOrder(draftBlocks.map((b) => b.id));
-    draggingBlockRef.current = true;
-
-    const scheduleMove = (y) => {
-      pendingBlockYRef.current = y;
-      if (rafBlockRef.current) return;
-      rafBlockRef.current = requestAnimationFrame(() => {
-        rafBlockRef.current = null;
-        if (pendingBlockYRef.current != null) computeBlockReorder(id, pendingBlockYRef.current);
-      });
-    };
-
-    const handleMove = (ev) => {
-      if (!draggingBlockRef.current) return;
-      if (ev.cancelable) ev.preventDefault();
-      const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
-      scheduleMove(y);
-    };
-
-    const handleUp = () => {
-      draggingBlockRef.current = false;
-      if (rafBlockRef.current) {
-        cancelAnimationFrame(rafBlockRef.current);
-        rafBlockRef.current = null;
-      }
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-      window.removeEventListener("touchmove", handleMove);
-      window.removeEventListener("touchend", handleUp);
-      activeBlockListenersRef.current = null;
-      setLocalBlockOrder((finalOrder) => {
-        commitBlockReorder(finalOrder);
-        return finalOrder;
-      });
-      setDragBlockId(null);
-    };
-
-    activeBlockListenersRef.current = { move: handleMove, up: handleUp };
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
-    window.addEventListener("touchmove", handleMove, { passive: false });
-    window.addEventListener("touchend", handleUp);
-  };
-
-  const handleBlockGripDown = (e, id) => {
-    e.preventDefault();
-    startBlockDrag(id);
-  };
-
-  const startResize = (e, id) => {
+  // Single pointer-drag handler that covers both moving and resizing —
+  // same proven approach used elsewhere in the app, kept self-contained
+  // and always cleaned up on release (or on unmount, via the effect above).
+  const startManipulate = (e, id, mode) => {
     e.preventDefault();
     e.stopPropagation();
     const point = e.touches ? e.touches[0] : e;
-    const block = draftBlocks.find((b) => b.id === id);
-    if (!block) return;
-    manipRef.current = { id, startX: point.clientX, startWidth: block.width, aspect: block.aspect };
+    const img = draftImages.find((im) => im.id === id);
+    if (!img) return;
+    manipRef.current = { id, mode, startX: point.clientX, startY: point.clientY, orig: { ...img } };
 
     const handleMove = (ev) => {
       const m = manipRef.current;
       if (!m) return;
+      if (ev.cancelable) ev.preventDefault();
       const p = ev.touches ? ev.touches[0] : ev;
       const dx = p.clientX - m.startX;
-      const width = Math.max(60, Math.min(560, m.startWidth + dx));
-      const height = Math.round(width / m.aspect);
-      setDraftBlocks((prev) => prev.map((b) => (b.id === m.id ? { ...b, width, height } : b)));
+      const dy = p.clientY - m.startY;
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+
+      setDraftImages((prev) =>
+        prev.map((im) => {
+          if (im.id !== m.id) return im;
+          if (m.mode === "move") {
+            let x = m.orig.x + dx;
+            let y = m.orig.y + dy;
+            if (canvasRect) {
+              x = Math.max(0, Math.min(x, canvasRect.width - im.width));
+              y = Math.max(0, Math.min(y, canvasRect.height - im.height));
+            }
+            return { ...im, x, y };
+          } else {
+            const width = Math.max(50, m.orig.width + dx);
+            const height = Math.round(width / m.orig.aspect);
+            return { ...im, width, height };
+          }
+        })
+      );
     };
 
     const handleUp = () => {
@@ -1166,17 +1096,31 @@ function NotesView({ notes, saveNotes }) {
       window.removeEventListener("pointerup", handleUp);
       window.removeEventListener("touchmove", handleMove);
       window.removeEventListener("touchend", handleUp);
-      setDraftBlocks((current) => {
+      activeListenersRef.current = null;
+      setDraftImages((current) => {
         saveActive(current);
         return current;
       });
     };
 
+    activeListenersRef.current = { move: handleMove, up: handleUp };
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp);
     window.addEventListener("touchmove", handleMove, { passive: false });
     window.addEventListener("touchend", handleUp);
   };
+
+  const previewFor = (n) => {
+    const norm = normalizeNote(n);
+    return norm.text.trim() || "Empty note";
+  };
+
+  const thumbFor = (n) => {
+    const norm = normalizeNote(n);
+    return norm.images.length > 0 ? norm.images[0].src : null;
+  };
+
+  const canvasHeight = Math.max(280, ...draftImages.map((im) => im.y + im.height + 20), 0);
 
   if (active) {
     return (
@@ -1194,59 +1138,73 @@ function NotesView({ notes, saveNotes }) {
           </button>
         </div>
 
+        <p className="text-xs text-[#8A8071] mb-1.5">
+          Drag a photo anywhere on the page — drag the corner dot to resize, and use front/back to layer it with your text.
+        </p>
+
         <div
-          onDragOver={(e) => e.preventDefault()}
+          ref={canvasRef}
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={() => setIsDragOver(false)}
           onDrop={handleDrop}
-          className="space-y-2 min-h-[200px] bg-white border border-[#DDD3BD] rounded px-3 py-2 mb-3"
+          style={{ height: canvasHeight }}
+          className={`relative w-full border-2 rounded-lg mb-3 overflow-hidden transition-colors ${
+            isDragOver ? "border-[var(--accent)] border-dashed bg-[#F6F1E7]" : "border-[#DDD3BD] border-dashed bg-white"
+          }`}
         >
-          {(dragBlockId ? localBlockOrder.map((id) => draftBlocks.find((b) => b.id === id)).filter(Boolean) : draftBlocks).map((b) =>
-            b.type === "text" ? (
-              <div key={b.id} ref={(node) => { blockRefs.current[b.id] = node; }}>
-                <AutoTextarea
-                  value={b.text}
-                  onChange={(text) => updateTextBlock(b.id, text)}
-                  onBlur={() => saveActive()}
-                  placeholder="Write your note, or drag a photo in…"
-                />
-              </div>
-            ) : (
-              <div
-                key={b.id}
-                ref={(node) => { blockRefs.current[b.id] = node; }}
-                className="relative inline-block group no-select"
-                style={{ width: b.width, opacity: dragBlockId === b.id ? 0.5 : 1 }}
+          {/* Text layer fills the canvas; images can sit above (front) or below (back) it via z-index */}
+          <textarea
+            value={draftText}
+            onChange={(e) => setDraftText(e.target.value)}
+            onBlur={() => saveActive()}
+            placeholder="Write your note… drag a photo anywhere on this page"
+            className="absolute inset-0 w-full h-full bg-transparent outline-none resize-none text-sm p-3 leading-relaxed"
+            style={{ zIndex: 5 }}
+          />
+
+          {draftImages.map((img) => (
+            <div
+              key={img.id}
+              style={{
+                left: img.x,
+                top: img.y,
+                width: img.width,
+                height: img.height,
+                position: "absolute",
+                zIndex: img.front ? 10 : 1,
+              }}
+              className="group touch-none"
+            >
+              <img
+                src={img.src}
+                alt=""
+                onPointerDown={(e) => startManipulate(e, img.id, "move")}
+                onTouchStart={(e) => startManipulate(e, img.id, "move")}
+                draggable={false}
+                className="w-full h-full object-cover rounded shadow-sm cursor-move select-none no-select block"
+              />
+              <button
+                onClick={() => removeImage(img.id)}
+                className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow opacity-100"
+                title="Remove photo"
               >
-                <img
-                  src={b.src}
-                  alt=""
-                  draggable={false}
-                  style={{ width: b.width, height: b.height }}
-                  className="rounded shadow-sm select-none no-select block"
-                />
-                <button
-                  onClick={() => removeBlock(b.id)}
-                  className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow"
-                  title="Remove photo"
-                >
-                  <X size={12} />
-                </button>
-                <div
-                  onPointerDown={(e) => handleBlockGripDown(e, b.id)}
-                  onTouchStart={(e) => handleBlockGripDown(e, b.id)}
-                  className="absolute -top-2 left-1/2 -translate-x-1/2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow cursor-grab active:cursor-grabbing touch-none"
-                  title="Drag to move"
-                >
-                  <GripVertical size={12} />
-                </div>
-                <div
-                  onPointerDown={(e) => startResize(e, b.id)}
-                  onTouchStart={(e) => startResize(e, b.id)}
-                  className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-[var(--accent)] rounded-full cursor-nwse-resize border-2 border-white shadow touch-none"
-                  title="Drag to resize"
-                />
-              </div>
-            )
-          )}
+                <X size={12} />
+              </button>
+              <button
+                onClick={() => setFront(img.id, !img.front)}
+                className="absolute -top-2 left-1/2 -translate-x-1/2 bg-[#2E2A24] text-white text-[9px] px-1.5 py-0.5 rounded-full shadow opacity-100 whitespace-nowrap"
+                title="Toggle front/back"
+              >
+                {img.front ? "Send back" : "Bring front"}
+              </button>
+              <div
+                onPointerDown={(e) => startManipulate(e, img.id, "resize")}
+                onTouchStart={(e) => startManipulate(e, img.id, "resize")}
+                className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-[var(--accent)] rounded-full cursor-nwse-resize border-2 border-white shadow touch-none"
+                title="Drag to resize"
+              />
+            </div>
+          ))}
         </div>
 
         <input
@@ -1265,7 +1223,6 @@ function NotesView({ notes, saveNotes }) {
           <ImageIcon size={15} />
           {uploading ? "Adding photo…" : "Add a photo"}
         </button>
-        <p className="text-xs text-[#8A8071] mt-2">Photos drop in below your text — drag the corner dot to resize.</p>
       </Card>
     );
   }
