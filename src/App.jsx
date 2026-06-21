@@ -317,6 +317,7 @@ function CalendarView({ events, saveEvents }) {
             const isToday = k === todayKey();
             const isSelected = k === selected;
             const hasEvents = (events[k] || []).length > 0;
+            const isPast = k < todayKey();
             return (
               <button
                 key={i}
@@ -326,7 +327,12 @@ function CalendarView({ events, saveEvents }) {
                 }`}
               >
                 {d}
-                {hasEvents && <span className={`absolute bottom-1 w-1 h-1 rounded-full ${isSelected ? "bg-white" : "bg-[var(--accent)]"}`} />}
+                {hasEvents && (
+                  <span
+                    className="absolute bottom-1 w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: isPast ? "#C0392B" : "#3F9142" }}
+                  />
+                )}
               </button>
             );
           })}
@@ -546,13 +552,13 @@ function TodoView({ todos, saveTodos }) {
                   key={id}
                   ref={(node) => { itemRefs.current[id] = node; }}
                   style={{ backgroundColor: activeCat.bg, opacity: isDragging ? 0.6 : 1 }}
-                  className="flex items-center justify-between rounded px-2 py-2 transition-colors"
+                  className="flex items-center justify-between rounded px-2 py-2 transition-colors no-select"
                 >
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <button
                       onPointerDown={(e) => handlePointerDown(e, id)}
                       onTouchStart={(e) => handlePointerDown(e, id)}
-                      className="text-[#B9AF9A] hover:text-[#8A8071] cursor-grab active:cursor-grabbing shrink-0 touch-none"
+                      className="text-[#B9AF9A] hover:text-[#8A8071] cursor-grab active:cursor-grabbing shrink-0 touch-none no-select"
                       title="Drag to reorder"
                     >
                       <GripVertical size={16} />
