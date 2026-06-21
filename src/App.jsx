@@ -882,12 +882,16 @@ function NotesView({ notes, saveNotes }) {
   const [draftTitle, setDraftTitle] = useState("");
   const [draftText, setDraftText] = useState("");
   const [draftImages, setDraftImages] = useState([]); // [{id, src, x, y, width, height, front, aspect}]
+  const [draftTextSize, setDraftTextSize] = useState("normal"); // 'small' | 'normal' | 'large'
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const manipRef = useRef(null);
   const activeListenersRef = useRef(null);
+  const rafRef = useRef(null);
+  const pendingRef = useRef(null);
 
   // Migrate from older note shapes (blocks-based, or plain body) into the
   // new { text, images[] } shape used by the freeform canvas.
@@ -914,6 +918,10 @@ function NotesView({ notes, saveNotes }) {
 
   useEffect(() => {
     return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
       if (activeListenersRef.current) {
         const { move, up } = activeListenersRef.current;
         window.removeEventListener("pointermove", move);
@@ -931,17 +939,19 @@ function NotesView({ notes, saveNotes }) {
     setDraftTitle(norm.title);
     setDraftText(norm.text);
     setDraftImages(norm.images);
+    setDraftTextSize(norm.textSize || "normal");
+    setSelectedId(null);
   };
 
   const newNote = async () => {
-    const n = { id: Date.now().toString(), title: "Untitled", text: "", images: [], updated: Date.now() };
+    const n = { id: Date.now().toString(), title: "Untitled", text: "", images: [], textSize: "normal", updated: Date.now() };
     await saveNotes([n, ...notes]);
     openNote(n);
   };
 
-  const saveActive = async (images = draftImages, text = draftText, title = draftTitle) => {
+  const saveActive = async (images = draftImages, text = draftText, title = draftTitle, textSize = draftTextSize) => {
     const next = notes.map((n) =>
-      n.id === active ? { ...n, title: title || "Untitled", text, body: text, images, updated: Date.now() } : n
+      n.id === active ? { ...n, title: title || "Untitled", text, body: text, images, textSize, updated: Date.now() } : n
     );
     await saveNotes(next);
   };
@@ -1053,21 +1063,25 @@ function NotesView({ notes, saveNotes }) {
   // Single pointer-drag handler that covers both moving and resizing —
   // same proven approach used elsewhere in the app, kept self-contained
   // and always cleaned up on release (or on unmount, via the effect above).
+  const manipulatingRef = useRef(false);
+
   const startManipulate = (e, id, mode) => {
+    if (manipulatingRef.current) return;
     e.preventDefault();
     e.stopPropagation();
     const point = e.touches ? e.touches[0] : e;
     const img = draftImages.find((im) => im.id === id);
     if (!img) return;
     manipRef.current = { id, mode, startX: point.clientX, startY: point.clientY, orig: { ...img } };
+    manipulatingRef.current = true;
 
-    const handleMove = (ev) => {
+    const applyMove = () => {
+      rafRef.current = null;
+      const data = pendingRef.current;
+      if (!data) return;
       const m = manipRef.current;
       if (!m) return;
-      if (ev.cancelable) ev.preventDefault();
-      const p = ev.touches ? ev.touches[0] : ev;
-      const dx = p.clientX - m.startX;
-      const dy = p.clientY - m.startY;
+      const { dx, dy } = data;
       const canvasRect = canvasRef.current?.getBoundingClientRect();
 
       setDraftImages((prev) =>
@@ -1090,8 +1104,22 @@ function NotesView({ notes, saveNotes }) {
       );
     };
 
+    const handleMove = (ev) => {
+      const m = manipRef.current;
+      if (!m) return;
+      if (ev.cancelable) ev.preventDefault();
+      const p = ev.touches ? ev.touches[0] : ev;
+      pendingRef.current = { dx: p.clientX - m.startX, dy: p.clientY - m.startY };
+      if (rafRef.current == null) rafRef.current = requestAnimationFrame(applyMove);
+    };
+
     const handleUp = () => {
       manipRef.current = null;
+      manipulatingRef.current = false;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
       window.removeEventListener("touchmove", handleMove);
@@ -1138,15 +1166,36 @@ function NotesView({ notes, saveNotes }) {
           </button>
         </div>
 
-        <p className="text-xs text-[#8A8071] mb-1.5">
-          Drag a photo anywhere on the page — drag the corner dot to resize, and use front/back to layer it with your text.
-        </p>
+        <div className="flex items-center gap-1 mb-2 pb-2 border-b border-[#DDD3BD]">
+          <span className="text-xs text-[#8A8071] mr-1">Text size:</span>
+          {[
+            { id: "small", label: "S" },
+            { id: "normal", label: "M" },
+            { id: "large", label: "L" },
+          ].map((s) => (
+            <button
+              key={s.id}
+              onClick={() => {
+                setDraftTextSize(s.id);
+                saveActive(draftImages, draftText, draftTitle, s.id);
+              }}
+              style={draftTextSize === s.id ? { backgroundColor: "var(--accent)" } : {}}
+              className={`w-7 h-7 rounded text-xs font-medium transition-colors ${
+                draftTextSize === s.id ? "text-white" : "bg-[#F6F1E7] text-[#2E2A24] hover:bg-[#EDE6D6]"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+          <span className="text-xs text-[#8A8071] ml-3">Tap a photo to move, resize, or remove it</span>
+        </div>
 
         <div
           ref={canvasRef}
           onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
           onDragLeave={() => setIsDragOver(false)}
           onDrop={handleDrop}
+          onClick={() => setSelectedId(null)}
           style={{ height: canvasHeight }}
           className={`relative w-full border-2 rounded-lg mb-3 overflow-hidden transition-colors ${
             isDragOver ? "border-[var(--accent)] border-dashed bg-[#F6F1E7]" : "border-[#DDD3BD] border-dashed bg-white"
@@ -1158,59 +1207,72 @@ function NotesView({ notes, saveNotes }) {
             onChange={(e) => setDraftText(e.target.value)}
             onBlur={() => saveActive()}
             placeholder="Write your note… drag a photo anywhere on this page"
-            className="absolute inset-0 w-full h-full bg-transparent outline-none resize-none text-sm p-3 leading-relaxed"
-            style={{ zIndex: 5 }}
+            style={{
+              zIndex: 5,
+              fontSize: draftTextSize === "small" ? "12px" : draftTextSize === "large" ? "18px" : "14px",
+            }}
+            className="absolute inset-0 w-full h-full bg-transparent outline-none resize-none p-3 leading-relaxed"
           />
 
-          {draftImages.map((img) => (
-            <div
-              key={img.id}
-              style={{ left: img.x, top: img.y, width: img.width, height: img.height, position: "absolute" }}
-            >
-              {/* The photo itself respects front/back layering against the text */}
-              <img
-                src={img.src}
-                alt=""
-                draggable={false}
-                style={{ zIndex: img.front ? 10 : 1, position: "relative" }}
-                className="w-full h-full object-cover rounded shadow-sm select-none no-select block"
-              />
+          {draftImages.map((img) => {
+            const isSelected = selectedId === img.id;
+            return (
+              <div
+                key={img.id}
+                style={{ left: img.x, top: img.y, width: img.width, height: img.height, position: "absolute" }}
+              >
+                {/* The photo itself respects front/back layering against the text */}
+                <img
+                  src={img.src}
+                  alt=""
+                  draggable={false}
+                  onClick={(e) => { e.stopPropagation(); setSelectedId(img.id); }}
+                  style={{ zIndex: img.front ? 10 : 1, position: "relative" }}
+                  className={`w-full h-full object-cover rounded select-none no-select block cursor-pointer transition-shadow ${
+                    isSelected ? "shadow-[0_0_0_2px_var(--accent)]" : "shadow-sm"
+                  }`}
+                />
 
-              {/* Controls always stay clickable on top, even when the photo is sent behind the text */}
-              <div
-                onPointerDown={(e) => startManipulate(e, img.id, "move")}
-                onTouchStart={(e) => startManipulate(e, img.id, "move")}
-                style={{ zIndex: 20 }}
-                className="absolute -top-2 -left-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow cursor-grab active:cursor-grabbing touch-none"
-                title="Drag to move"
-              >
-                <GripVertical size={12} />
+                {/* Controls only appear once the photo is tapped/selected — clean canvas by default */}
+                {isSelected && (
+                  <>
+                    <div
+                      onPointerDown={(e) => startManipulate(e, img.id, "move")}
+                      onTouchStart={(e) => startManipulate(e, img.id, "move")}
+                      style={{ zIndex: 20 }}
+                      className="absolute -top-2 -left-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow cursor-grab active:cursor-grabbing touch-none"
+                      title="Drag to move"
+                    >
+                      <GripVertical size={12} />
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeImage(img.id); }}
+                      style={{ zIndex: 20 }}
+                      className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow"
+                      title="Remove photo"
+                    >
+                      <X size={12} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setFront(img.id, !img.front); }}
+                      style={{ zIndex: 20 }}
+                      className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#2E2A24] text-white text-[9px] px-1.5 py-0.5 rounded-full shadow whitespace-nowrap"
+                      title="Toggle front/back"
+                    >
+                      {img.front ? "Send back" : "Bring front"}
+                    </button>
+                    <div
+                      onPointerDown={(e) => startManipulate(e, img.id, "resize")}
+                      onTouchStart={(e) => startManipulate(e, img.id, "resize")}
+                      style={{ zIndex: 20 }}
+                      className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-[var(--accent)] rounded-full cursor-nwse-resize border-2 border-white shadow touch-none"
+                      title="Drag to resize"
+                    />
+                  </>
+                )}
               </div>
-              <button
-                onClick={() => removeImage(img.id)}
-                style={{ zIndex: 20 }}
-                className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow"
-                title="Remove photo"
-              >
-                <X size={12} />
-              </button>
-              <button
-                onClick={() => setFront(img.id, !img.front)}
-                style={{ zIndex: 20 }}
-                className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#2E2A24] text-white text-[9px] px-1.5 py-0.5 rounded-full shadow whitespace-nowrap"
-                title="Toggle front/back"
-              >
-                {img.front ? "Send back" : "Bring front"}
-              </button>
-              <div
-                onPointerDown={(e) => startManipulate(e, img.id, "resize")}
-                onTouchStart={(e) => startManipulate(e, img.id, "resize")}
-                style={{ zIndex: 20 }}
-                className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-[var(--accent)] rounded-full cursor-nwse-resize border-2 border-white shadow touch-none"
-                title="Drag to resize"
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <input
