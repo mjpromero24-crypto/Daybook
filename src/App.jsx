@@ -72,6 +72,7 @@ export default function DailyCompanion() {
   const [bgTop, saveBgTop, bgTopLoaded] = useStore("companion:bgtop", "#F6F1E7");
   const [bgBottom, saveBgBottom, bgBottomLoaded] = useStore("companion:bgbottom", "#F6F1E7");
   const [bgImage, saveBgImage, bgImageLoaded] = useStore("companion:bgimage", null);
+  const [calendarBgImage, saveCalendarBgImage, calendarBgImageLoaded] = useStore("companion:calendarbgimage", null);
   const [textMode, saveTextMode, textModeLoaded] = useStore("companion:textmode", "auto");
   const [customText, saveCustomText, customTextLoaded] = useStore("companion:customtext", "#2E2A24");
   const [glossy, saveGlossy, glossyLoaded] = useStore("companion:glossy", false);
@@ -82,7 +83,7 @@ export default function DailyCompanion() {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
 
-  const ready = eventsLoaded && todosLoaded && habitsLoaded && notesLoaded && diaryLoaded && appNameLoaded && accentLoaded && bgTopLoaded && bgBottomLoaded && bgImageLoaded && textModeLoaded && customTextLoaded && glossyLoaded && headerBgLoaded && navBgLoaded && cardBgLoaded;
+  const ready = eventsLoaded && todosLoaded && habitsLoaded && notesLoaded && diaryLoaded && appNameLoaded && accentLoaded && bgTopLoaded && bgBottomLoaded && bgImageLoaded && calendarBgImageLoaded && textModeLoaded && customTextLoaded && glossyLoaded && headerBgLoaded && navBgLoaded && cardBgLoaded;
   const avgLuminance = (getLuminance(bgTop) + getLuminance(bgBottom)) / 2;
   const pageText = textMode === "custom" ? customText : (avgLuminance < 0.45 ? "#F2EDE3" : "#2E2A24");
   const bgStyle = bgImage
@@ -164,7 +165,7 @@ export default function DailyCompanion() {
           <div className="text-center text-[#8A8071] py-20 text-sm">Loading your daybook…</div>
         ) : (
           <div key={tab} className="animate-[fadein_0.25s_ease-out]">
-            {tab === "calendar" && <CalendarView events={events} saveEvents={saveEvents} />}
+            {tab === "calendar" && <CalendarView events={events} saveEvents={saveEvents} bgImage={calendarBgImage} />}
             {tab === "todo" && <TodoView todos={todos} saveTodos={saveTodos} />}
             {tab === "tracker" && <TrackerView habits={habits} saveHabits={saveHabits} />}
             {tab === "notes" && <NotesView notes={notes} saveNotes={saveNotes} />}
@@ -179,6 +180,8 @@ export default function DailyCompanion() {
                 saveBgBottom={saveBgBottom}
                 bgImage={bgImage}
                 saveBgImage={saveBgImage}
+                calendarBgImage={calendarBgImage}
+                saveCalendarBgImage={saveCalendarBgImage}
                 textMode={textMode}
                 saveTextMode={saveTextMode}
                 customText={customText}
@@ -238,18 +241,23 @@ export default function DailyCompanion() {
   );
 }
 
-function Card({ children, className = "" }) {
+function Card({ children, className = "", bgImage = null }) {
   return (
     <div
-      className={`glass-card border border-[#DDD3BD] rounded-lg ${className}`}
-      style={{ backgroundColor: "var(--card-bg)", color: "var(--card-text)" }}
+      className={`glass-card border border-[#DDD3BD] rounded-lg relative ${className}`}
+      style={
+        bgImage
+          ? { backgroundImage: `url(${bgImage})`, backgroundSize: "cover", backgroundPosition: "center", color: "var(--card-text)" }
+          : { backgroundColor: "var(--card-bg)", color: "var(--card-text)" }
+      }
     >
-      {children}
+      {bgImage && <div className="absolute inset-0 rounded-lg bg-white/55 pointer-events-none" />}
+      <div className="relative">{children}</div>
     </div>
   );
 }
 
-function CalendarView({ events, saveEvents }) {
+function CalendarView({ events, saveEvents, bgImage }) {
   const [cursor, setCursor] = useState(new Date());
   const [selected, setSelected] = useState(todayKey());
   const [draft, setDraft] = useState("");
@@ -328,7 +336,7 @@ function CalendarView({ events, saveEvents }) {
 
   return (
     <div className="space-y-5">
-      <Card className="p-4">
+      <Card className="p-4" bgImage={bgImage}>
         <div className="flex items-center justify-between mb-4">
           <button onClick={goPrev} className="p-1.5 rounded hover:bg-[#EDE6D6]" title="Previous">
             <ChevronLeft size={18} />
@@ -1404,20 +1412,22 @@ function SettingsView({
   accent, saveAccent,
   bgTop, saveBgTop, bgBottom, saveBgBottom,
   bgImage, saveBgImage,
+  calendarBgImage, saveCalendarBgImage,
   textMode, saveTextMode, customText, saveCustomText,
   glossy, saveGlossy,
   headerBg, saveHeaderBg, navBg, saveNavBg, cardBg, saveCardBg,
 }) {
   const bgFileInputRef = useRef(null);
+  const calendarBgFileInputRef = useRef(null);
   const [uploadingBg, setUploadingBg] = useState(false);
+  const [uploadingCalendarBg, setUploadingCalendarBg] = useState(false);
 
-  const compressBgImage = (file) =>
+  const compressBgImage = (file, maxDim = 1600) =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const img = new Image();
         img.onload = () => {
-          const maxDim = 1600;
           let { width, height } = img;
           if (width > maxDim || height > maxDim) {
             if (width > height) {
@@ -1454,6 +1464,21 @@ function SettingsView({
     } finally {
       setUploadingBg(false);
       if (bgFileInputRef.current) bgFileInputRef.current.value = "";
+    }
+  };
+
+  const handleCalendarBgUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingCalendarBg(true);
+    try {
+      const dataUrl = await compressBgImage(file, 1000);
+      await saveCalendarBgImage(dataUrl);
+    } catch (err) {
+      console.error("Calendar background upload error:", err);
+    } finally {
+      setUploadingCalendarBg(false);
+      if (calendarBgFileInputRef.current) calendarBgFileInputRef.current.value = "";
     }
   };
 
@@ -1571,6 +1596,42 @@ function SettingsView({
       </Card>
 
       <Card className="p-4">
+        <p className="text-sm font-medium mb-1">Calendar background</p>
+        <p className="text-xs text-[#8A8071] mb-3">Give just the Calendar tab its own background photo.</p>
+
+        {calendarBgImage ? (
+          <div>
+            <img src={calendarBgImage} alt="Calendar background preview" className="w-full h-24 object-cover rounded-lg border border-[#DDD3BD] mb-2" />
+            <div className="flex gap-2">
+              <button
+                onClick={() => calendarBgFileInputRef.current?.click()}
+                disabled={uploadingCalendarBg}
+                className="flex-1 text-sm bg-[#F6F1E7] hover:bg-[#EDE6D6] text-[#2E2A24] rounded-lg px-3 py-2 transition-colors disabled:opacity-50"
+              >
+                {uploadingCalendarBg ? "Uploading…" : "Change photo"}
+              </button>
+              <button
+                onClick={() => saveCalendarBgImage(null)}
+                className="text-sm text-[#8A8071] hover:text-[var(--accent)] border border-[#DDD3BD] rounded-lg px-3 py-2"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => calendarBgFileInputRef.current?.click()}
+            disabled={uploadingCalendarBg}
+            className="flex items-center gap-1.5 text-sm text-[#8A8071] hover:text-[var(--accent)] border border-dashed border-[#DDD3BD] rounded-lg px-3 py-2 w-full justify-center transition-colors disabled:opacity-50"
+          >
+            <ImageIcon size={15} />
+            {uploadingCalendarBg ? "Uploading…" : "Upload a calendar photo"}
+          </button>
+        )}
+        <input ref={calendarBgFileInputRef} type="file" accept="image/*" onChange={handleCalendarBgUpload} className="hidden" />
+      </Card>
+
+      <Card className="p-4">
         <p className="text-sm font-medium mb-1">Text color</p>
         <p className="text-xs text-[#8A8071] mb-3">Auto picks light or dark text to stay readable against the page background.</p>
         <div className="flex gap-2 mb-3">
@@ -1620,6 +1681,7 @@ function SettingsView({
           saveBgTop("#F6F1E7");
           saveBgBottom("#F6F1E7");
           saveBgImage(null);
+          saveCalendarBgImage(null);
           saveTextMode("auto");
           saveGlossy(false);
           saveHeaderBg("#FBF8F1");
