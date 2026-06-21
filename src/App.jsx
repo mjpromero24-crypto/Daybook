@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Calendar as CalendarIcon, CheckSquare, FileText, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, X, ListTodo, Briefcase, Home, Pencil, Check, Palette, Settings as SettingsIcon, GripVertical, Image as ImageIcon } from "lucide-react";
+import { Calendar as CalendarIcon, CheckSquare, FileText, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, X, ListTodo, Briefcase, Home, Pencil, Check, Palette, Settings as SettingsIcon, GripVertical, Image as ImageIcon, Bell } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { LocalNotifications } from "@capacitor/local-notifications";
 
@@ -80,6 +80,45 @@ async function cancelEventReminder(notifId) {
     await LocalNotifications.cancel({ notifications: [{ id: notifId }] });
   } catch (err) {
     console.error("Reminder cancel error:", err);
+  }
+}
+
+// Habits repeat every day at the same time, rather than firing once like a
+// calendar event — Capacitor supports this natively via schedule.on + repeats.
+async function scheduleHabitReminder(time, title, body, notifId) {
+  if (!remindersSupported() || !time) return;
+  try {
+    const perm = await LocalNotifications.checkPermissions();
+    if (perm.display !== "granted") {
+      const req = await LocalNotifications.requestPermissions();
+      if (req.display !== "granted") return;
+    }
+    await ensureAlarmChannel();
+    const [hh, mm] = time.split(":").map(Number);
+    // Cancel any previous reminder for this habit first, so changing the
+    // time doesn't leave a duplicate scheduled at the old time.
+    await LocalNotifications.cancel({ notifications: [{ id: notifId }] });
+    await LocalNotifications.schedule({
+      notifications: [{
+        id: notifId,
+        title,
+        body,
+        schedule: { on: { hour: hh, minute: mm }, repeats: true, allowWhileIdle: true },
+        channelId: "alarm-style",
+        sound: "default",
+      }],
+    });
+  } catch (err) {
+    console.error("Habit reminder schedule error:", err);
+  }
+}
+
+async function cancelHabitReminder(notifId) {
+  if (!remindersSupported()) return;
+  try {
+    await LocalNotifications.cancel({ notifications: [{ id: notifId }] });
+  } catch (err) {
+    console.error("Habit reminder cancel error:", err);
   }
 }
 
@@ -926,11 +965,13 @@ function TodoView({ todos, saveTodos }) {
 
 function TrackerView({ habits, saveHabits }) {
   const [draft, setDraft] = useState("");
+  const [editingReminderId, setEditingReminderId] = useState(null);
+  const [reminderDraft, setReminderDraft] = useState("");
   const today = todayKey();
 
   const addHabit = async () => {
     if (!draft.trim()) return;
-    await saveHabits([...habits, { id: Date.now().toString(), name: draft.trim(), log: {} }]);
+    await saveHabits([...habits, { id: Date.now().toString(), name: draft.trim(), log: {}, reminderTime: null }]);
     setDraft("");
   };
 
@@ -945,6 +986,41 @@ function TrackerView({ habits, saveHabits }) {
 
   const removeHabit = async (id) => {
     await saveHabits(habits.filter((h) => h.id !== id));
+    cancelHabitReminder(idToNotificationId(id));
+  };
+
+  const openReminderEditor = (h) => {
+    setEditingReminderId(h.id);
+    setReminderDraft(h.reminderTime || "");
+  };
+
+  const saveReminder = async () => {
+    const h = habits.find((x) => x.id === editingReminderId);
+    if (!h) return;
+    const next = habits.map((x) => (x.id === editingReminderId ? { ...x, reminderTime: reminderDraft || null } : x));
+    await saveHabits(next);
+    const notifId = idToNotificationId(h.id);
+    if (reminderDraft) {
+      scheduleHabitReminder(reminderDraft, "🔁 Habit reminder", h.name, notifId);
+    } else {
+      cancelHabitReminder(notifId);
+    }
+    setEditingReminderId(null);
+  };
+
+  const clearReminder = async (h) => {
+    const next = habits.map((x) => (x.id === h.id ? { ...x, reminderTime: null } : x));
+    await saveHabits(next);
+    cancelHabitReminder(idToNotificationId(h.id));
+    setEditingReminderId(null);
+  };
+
+  const formatTime = (t) => {
+    if (!t) return "";
+    const [h, m] = t.split(":").map(Number);
+    const period = h >= 12 ? "PM" : "AM";
+    const hour12 = h % 12 === 0 ? 12 : h % 12;
+    return `${hour12}:${String(m).padStart(2, "0")} ${period}`;
   };
 
   const streak = (h) => {
@@ -980,24 +1056,57 @@ function TrackerView({ habits, saveHabits }) {
       ) : (
         <div className="space-y-2">
           {habits.map((h) => (
-            <Card key={h.id} className="p-3 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => toggleToday(h.id)}
-                  className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors active:scale-90 ${
-                    h.log[today] ? "bg-[var(--accent)] border-[var(--accent)]" : "border-[#DDD3BD]"
-                  }`}
-                >
-                  {h.log[today] && <CheckSquare size={14} className="text-white pop-check" />}
-                </button>
-                <div>
-                  <p className="text-sm font-medium">{h.name}</p>
-                  <p className="text-xs text-[#8A8071]">{streak(h)} day streak</p>
+            <Card key={h.id} className="p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => toggleToday(h.id)}
+                    className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors active:scale-90 ${
+                      h.log[today] ? "bg-[var(--accent)] border-[var(--accent)]" : "border-[#DDD3BD]"
+                    }`}
+                  >
+                    {h.log[today] && <CheckSquare size={14} className="text-white pop-check" />}
+                  </button>
+                  <div>
+                    <p className="text-sm font-medium">{h.name}</p>
+                    <p className="text-xs text-[#8A8071]">
+                      {streak(h)} day streak
+                      {h.reminderTime && <span> · 🔔 {formatTime(h.reminderTime)} daily</span>}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => (editingReminderId === h.id ? setEditingReminderId(null) : openReminderEditor(h))}
+                    className={`p-1.5 rounded transition-colors ${h.reminderTime ? "text-[var(--accent)]" : "text-[#8A8071] hover:text-[var(--accent)]"}`}
+                    title="Set a daily reminder"
+                  >
+                    <Bell size={15} />
+                  </button>
+                  <button onClick={() => removeHabit(h.id)} className="text-[#8A8071] hover:text-[var(--accent)] p-1.5">
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </div>
-              <button onClick={() => removeHabit(h.id)} className="text-[#8A8071] hover:text-[var(--accent)]">
-                <Trash2 size={14} />
-              </button>
+
+              {editingReminderId === h.id && (
+                <div className="mt-3 pt-3 border-t border-[#DDD3BD] flex items-center gap-2">
+                  <input
+                    type="time"
+                    value={reminderDraft}
+                    onChange={(e) => setReminderDraft(e.target.value)}
+                    className="bg-white border border-[#DDD3BD] rounded px-2 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
+                  />
+                  <button onClick={saveReminder} className="bg-[var(--accent)] text-white rounded px-3 py-1.5 text-sm font-medium hover:opacity-90">
+                    Save
+                  </button>
+                  {h.reminderTime && (
+                    <button onClick={() => clearReminder(h)} className="text-sm text-[#8A8071] hover:text-[var(--accent)]">
+                      Remove reminder
+                    </button>
+                  )}
+                </div>
+              )}
             </Card>
           ))}
         </div>
