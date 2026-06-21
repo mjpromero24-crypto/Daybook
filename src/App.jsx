@@ -238,7 +238,6 @@ function CalendarView({ events, saveEvents }) {
   const [selected, setSelected] = useState(todayKey());
   const [draft, setDraft] = useState("");
   const [draftTime, setDraftTime] = useState("");
-  const [showPicker, setShowPicker] = useState(false);
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
@@ -276,32 +275,65 @@ function CalendarView({ events, saveEvents }) {
     await saveEvents(next);
   };
 
+  const [pickerView, setPickerView] = useState("days"); // 'days' | 'months' | 'years'
+  const decadeStart = Math.floor(year / 10) * 10;
+
+  const headerLabel =
+    pickerView === "days" ? `${monthNames[month]} ${year}` :
+    pickerView === "months" ? `${year}` :
+    `${decadeStart} - ${decadeStart + 9}`;
+
+  const goPrev = () => {
+    if (pickerView === "days") setCursor(new Date(year, month - 1, 1));
+    else if (pickerView === "months") setCursor(new Date(year - 1, month, 1));
+    else setCursor(new Date(year - 10, month, 1));
+  };
+
+  const goNext = () => {
+    if (pickerView === "days") setCursor(new Date(year, month + 1, 1));
+    else if (pickerView === "months") setCursor(new Date(year + 1, month, 1));
+    else setCursor(new Date(year + 10, month, 1));
+  };
+
+  const drillUp = () => {
+    if (pickerView === "days") setPickerView("months");
+    else if (pickerView === "months") setPickerView("years");
+  };
+
+  const pickMonth = (i) => {
+    setCursor(new Date(year, i, 1));
+    setPickerView("days");
+  };
+
+  const pickYear = (y) => {
+    setCursor(new Date(y, month, 1));
+    setPickerView("months");
+  };
+
   return (
     <div className="space-y-5">
       <Card className="p-4">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={() => setCursor(new Date(year, month - 1, 1))} className="p-1.5 rounded hover:bg-[#EDE6D6]" title="Previous month">
+          <button onClick={goPrev} className="p-1.5 rounded hover:bg-[#EDE6D6]" title="Previous">
             <ChevronLeft size={18} />
           </button>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowPicker((s) => !s)}
+              onClick={drillUp}
+              disabled={pickerView === "years"}
               className="font-medium px-2 py-1 rounded hover:bg-[#EDE6D6] transition-colors flex items-center gap-1"
               style={{ fontFamily: "Georgia, serif" }}
             >
-              {monthNames[month]} {year}
-              <ChevronDown
-                size={15}
-                className="transition-transform duration-300"
-                style={{ transform: showPicker ? "rotate(180deg)" : "rotate(0deg)" }}
-              />
+              {headerLabel}
+              {pickerView !== "years" && <ChevronDown size={15} />}
             </button>
             <button
               onClick={() => {
                 const now = new Date();
                 setCursor(now);
                 setSelected(todayKey(now));
+                setPickerView("days");
               }}
               style={{ backgroundColor: "var(--accent)" }}
               className="text-white text-xs font-medium px-2.5 py-1 rounded-full hover:opacity-90 active:scale-95 transition-all"
@@ -310,76 +342,80 @@ function CalendarView({ events, saveEvents }) {
             </button>
           </div>
 
-          <button onClick={() => setCursor(new Date(year, month + 1, 1))} className="p-1.5 rounded hover:bg-[#EDE6D6]" title="Next month">
+          <button onClick={goNext} className="p-1.5 rounded hover:bg-[#EDE6D6]" title="Next">
             <ChevronRight size={18} />
           </button>
         </div>
 
-        <div
-          className="overflow-hidden transition-all duration-300 ease-out"
-          style={{ maxHeight: showPicker ? 180 : 0, opacity: showPicker ? 1 : 0, marginBottom: showPicker ? 16 : 0 }}
-        >
-          <div className="bg-[#F6F1E7] rounded-lg p-3">
-            <div className="flex gap-1.5 overflow-x-auto pb-2 snap-x" style={{ scrollbarWidth: "none" }}>
+        <div key={pickerView} className="animate-[fadein_0.2s_ease-out]">
+          {pickerView === "days" && (
+            <>
+              <div className="grid grid-cols-7 gap-1 text-center text-xs text-[#8A8071] mb-1">
+                {dayNames.map((d, i) => <div key={i}>{d}</div>)}
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {cells.map((d, i) => {
+                  if (!d) return <div key={i} />;
+                  const k = keyFor(d);
+                  const isToday = k === todayKey();
+                  const isSelected = k === selected;
+                  const hasEvents = (events[k] || []).length > 0;
+                  const isPast = k < todayKey();
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setSelected(k)}
+                      className={`relative aspect-square rounded text-sm flex items-center justify-center transition-colors ${
+                        isSelected ? "bg-[var(--accent)] text-white" : isToday ? "bg-[#EDE6D6] font-semibold" : "hover:bg-[#EDE6D6]"
+                      }`}
+                    >
+                      {d}
+                      {hasEvents && (
+                        <span
+                          className="absolute bottom-1 w-1.5 h-1.5 rounded-full"
+                          style={{ backgroundColor: isPast ? "#C0392B" : "#3F9142" }}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {pickerView === "months" && (
+            <div className="grid grid-cols-4 gap-2 py-2">
               {monthNames.map((m, i) => (
                 <button
                   key={m}
-                  onClick={() => setCursor(new Date(year, i, 1))}
+                  onClick={() => pickMonth(i)}
                   style={i === month ? { backgroundColor: "var(--accent)" } : {}}
-                  className={`shrink-0 snap-start px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-200 ${
-                    i === month ? "text-white scale-105" : "bg-white text-[#2E2A24] hover:bg-[#EDE6D6]"
+                  className={`aspect-[3/2] rounded-lg text-sm font-medium flex items-center justify-center transition-all duration-200 ${
+                    i === month ? "text-white scale-105" : "hover:bg-[#EDE6D6] text-[#2E2A24]"
                   }`}
                 >
                   {m.slice(0, 3)}
                 </button>
               ))}
             </div>
-            <div className="flex gap-1.5 overflow-x-auto pt-1 snap-x" style={{ scrollbarWidth: "none" }}>
-              {Array.from({ length: 21 }, (_, i) => year - 10 + i).map((y) => (
+          )}
+
+          {pickerView === "years" && (
+            <div className="grid grid-cols-4 gap-2 py-2">
+              {Array.from({ length: 12 }, (_, i) => decadeStart - 1 + i).map((y) => (
                 <button
                   key={y}
-                  onClick={() => setCursor(new Date(y, month, 1))}
+                  onClick={() => pickYear(y)}
                   style={y === year ? { backgroundColor: "var(--accent)" } : {}}
-                  className={`shrink-0 snap-start px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-200 ${
-                    y === year ? "text-white scale-105" : "bg-white text-[#2E2A24] hover:bg-[#EDE6D6]"
+                  className={`aspect-[3/2] rounded-lg text-sm font-medium flex items-center justify-center transition-all duration-200 ${
+                    y === year ? "text-white scale-105" : y < decadeStart || y >= decadeStart + 10 ? "text-[#C7BCA3] hover:bg-[#EDE6D6]" : "hover:bg-[#EDE6D6] text-[#2E2A24]"
                   }`}
                 >
                   {y}
                 </button>
               ))}
             </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-7 gap-1 text-center text-xs text-[#8A8071] mb-1">
-          {dayNames.map((d, i) => <div key={i}>{d}</div>)}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-          {cells.map((d, i) => {
-            if (!d) return <div key={i} />;
-            const k = keyFor(d);
-            const isToday = k === todayKey();
-            const isSelected = k === selected;
-            const hasEvents = (events[k] || []).length > 0;
-            const isPast = k < todayKey();
-            return (
-              <button
-                key={i}
-                onClick={() => setSelected(k)}
-                className={`relative aspect-square rounded text-sm flex items-center justify-center transition-colors ${
-                  isSelected ? "bg-[var(--accent)] text-white" : isToday ? "bg-[#EDE6D6] font-semibold" : "hover:bg-[#EDE6D6]"
-                }`}
-              >
-                {d}
-                {hasEvents && (
-                  <span
-                    className="absolute bottom-1 w-1.5 h-1.5 rounded-full"
-                    style={{ backgroundColor: isPast ? "#C0392B" : "#3F9142" }}
-                  />
-                )}
-              </button>
-            );
-          })}
+          )}
         </div>
       </Card>
 
