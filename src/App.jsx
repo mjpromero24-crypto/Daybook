@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Calendar as CalendarIcon, CheckSquare, FileText, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, X, ListTodo, Briefcase, Home, Pencil, Check, Palette, Settings as SettingsIcon } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Calendar as CalendarIcon, CheckSquare, FileText, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, X, ListTodo, Briefcase, Home, Pencil, Check, Palette, Settings as SettingsIcon, GripVertical } from "lucide-react";
 
 const ACCENTS = [
   { name: "Terracotta", value: "#A9684F" },
@@ -363,6 +363,12 @@ function CalendarView({ events, saveEvents }) {
 function TodoView({ todos, saveTodos }) {
   const [category, saveCategory, categoryLoaded] = useStore("companion:todocategory", "work");
   const [draft, setDraft] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [dragId, setDragId] = useState(null);
+  const [localOrder, setLocalOrder] = useState([]);
+  const itemRefs = useRef({});
+  const draggingRef = useRef(false);
 
   const categories = [
     { id: "work", label: "Work", icon: Briefcase, color: "#4D6FA8", bg: "#E9EEF6" },
@@ -371,6 +377,9 @@ function TodoView({ todos, saveTodos }) {
 
   const activeCat = categories.find((c) => c.id === category);
   const filtered = todos.filter((t) => t.category === category);
+  const sortedFiltered = filtered.slice().sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1));
+  const displayOrder = dragId ? localOrder : sortedFiltered.map((t) => t.id);
+  const byId = Object.fromEntries(todos.map((t) => [t.id, t]));
 
   const addTodo = async () => {
     if (!draft.trim()) return;
@@ -384,6 +393,79 @@ function TodoView({ todos, saveTodos }) {
 
   const removeTodo = async (id) => {
     await saveTodos(todos.filter((t) => t.id !== id));
+  };
+
+  const startEdit = (t) => {
+    setEditingId(t.id);
+    setEditText(t.text);
+  };
+
+  const commitEdit = async () => {
+    if (!editingId) return;
+    const text = editText.trim();
+    if (text) {
+      await saveTodos(todos.map((t) => (t.id === editingId ? { ...t, text } : t)));
+    }
+    setEditingId(null);
+  };
+
+  const commitReorder = async (newOrderIds) => {
+    let ptr = 0;
+    const next = todos.map((t) => {
+      if (t.category !== category) return t;
+      const id = newOrderIds[ptr++];
+      return byId[id];
+    });
+    await saveTodos(next);
+  };
+
+  const handlePointerDown = (e, id) => {
+    e.preventDefault();
+    setDragId(id);
+    setLocalOrder(sortedFiltered.map((t) => t.id));
+    draggingRef.current = true;
+
+    const handleMove = (ev) => {
+      if (!draggingRef.current) return;
+      const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
+      setLocalOrder((prev) => {
+        const currentIndex = prev.indexOf(id);
+        let targetIndex = currentIndex;
+        for (let i = 0; i < prev.length; i++) {
+          const node = itemRefs.current[prev[i]];
+          if (!node) continue;
+          const rect = node.getBoundingClientRect();
+          const mid = rect.top + rect.height / 2;
+          if (y < mid) {
+            targetIndex = i;
+            break;
+          }
+          targetIndex = i;
+        }
+        if (targetIndex === currentIndex) return prev;
+        const next = prev.filter((x) => x !== id);
+        next.splice(targetIndex, 0, id);
+        return next;
+      });
+    };
+
+    const handleUp = () => {
+      draggingRef.current = false;
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("touchmove", handleMove);
+      window.removeEventListener("touchend", handleUp);
+      setLocalOrder((finalOrder) => {
+        commitReorder(finalOrder);
+        return finalOrder;
+      });
+      setDragId(null);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("touchmove", handleMove, { passive: false });
+    window.addEventListener("touchend", handleUp);
   };
 
   return (
@@ -435,12 +517,26 @@ function TodoView({ todos, saveTodos }) {
           <p className="text-sm text-[#8A8071] text-center py-6">No {category === "work" ? "work" : "day-to-day"} tasks yet.</p>
         ) : (
           <div className="space-y-2">
-            {filtered
-              .slice()
-              .sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1))
-              .map((t) => (
-                <div key={t.id} style={{ backgroundColor: activeCat.bg }} className="flex items-center justify-between rounded px-3 py-2 transition-colors">
-                  <div className="flex items-center gap-3 flex-1">
+            {displayOrder.map((id) => {
+              const t = byId[id];
+              if (!t) return null;
+              const isDragging = dragId === id;
+              return (
+                <div
+                  key={id}
+                  ref={(node) => { itemRefs.current[id] = node; }}
+                  style={{ backgroundColor: activeCat.bg, opacity: isDragging ? 0.6 : 1 }}
+                  className="flex items-center justify-between rounded px-2 py-2 transition-colors"
+                >
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <button
+                      onPointerDown={(e) => handlePointerDown(e, id)}
+                      onTouchStart={(e) => handlePointerDown(e, id)}
+                      className="text-[#B9AF9A] hover:text-[#8A8071] cursor-grab active:cursor-grabbing shrink-0 touch-none"
+                      title="Drag to reorder"
+                    >
+                      <GripVertical size={16} />
+                    </button>
                     <button
                       onClick={() => toggleDone(t.id)}
                       style={t.done ? { backgroundColor: activeCat.color, borderColor: activeCat.color } : { borderColor: "#C7BCA3" }}
@@ -448,13 +544,33 @@ function TodoView({ todos, saveTodos }) {
                     >
                       {t.done && <CheckSquare size={12} className="text-white pop-check" />}
                     </button>
-                    <span className={`text-sm transition-colors ${t.done ? "line-through text-[#8A8071]" : ""}`}>{t.text}</span>
+                    {editingId === t.id ? (
+                      <input
+                        autoFocus
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        onBlur={commitEdit}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEdit();
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        className="text-sm flex-1 bg-white border border-[var(--accent)] rounded px-2 py-0.5 outline-none min-w-0"
+                      />
+                    ) : (
+                      <span
+                        onClick={() => startEdit(t)}
+                        className={`text-sm transition-colors truncate cursor-text ${t.done ? "line-through text-[#8A8071]" : ""}`}
+                      >
+                        {t.text}
+                      </span>
+                    )}
                   </div>
-                  <button onClick={() => removeTodo(t.id)} className="text-[#8A8071] hover:text-[var(--accent)] transition-colors">
+                  <button onClick={() => removeTodo(t.id)} className="text-[#8A8071] hover:text-[var(--accent)] transition-colors p-1 shrink-0">
                     <Trash2 size={14} />
                   </button>
                 </div>
-              ))}
+              );
+            })}
           </div>
         )}
       </Card>
