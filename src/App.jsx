@@ -880,23 +880,30 @@ function TrackerView({ habits, saveHabits }) {
 function NotesView({ notes, saveNotes }) {
   const [active, setActive] = useState(null);
   const [draftTitle, setDraftTitle] = useState("");
-  const [draftText, setDraftText] = useState("");
+  const [draftHtml, setDraftHtml] = useState(""); // only used to seed the editor when a note opens — never fed back in while typing
   const [draftImages, setDraftImages] = useState([]); // [{id, src, x, y, width, height, front, aspect}]
-  const [draftTextSize, setDraftTextSize] = useState("normal"); // 'small' | 'normal' | 'large'
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
+  const editorRef = useRef(null);
   const manipRef = useRef(null);
   const activeListenersRef = useRef(null);
   const rafRef = useRef(null);
   const pendingRef = useRef(null);
 
+  const stripHtml = (html) => {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html || "";
+    return tmp.textContent || "";
+  };
+
   // Migrate from older note shapes (blocks-based, or plain body) into the
-  // new { text, images[] } shape used by the freeform canvas.
+  // new { html, images[] } shape used by the freeform canvas.
   const normalizeNote = (n) => {
-    if (n.images && n.text !== undefined) return n;
+    if (n.images && n.html !== undefined) return n;
+    if (n.images && n.text !== undefined) return { ...n, html: n.text ? `<div>${n.text}</div>` : "" };
     if (n.blocks) {
       const text = n.blocks.filter((b) => b.type === "text").map((b) => b.text).join("\n");
       const images = n.blocks
@@ -911,9 +918,9 @@ function NotesView({ notes, saveNotes }) {
           front: true,
           aspect: b.aspect || (b.width && b.height ? b.width / b.height : 1),
         }));
-      return { ...n, text, images };
+      return { ...n, html: text ? `<div>${text}</div>` : "", images };
     }
-    return { ...n, text: n.body || "", images: [] };
+    return { ...n, html: n.body ? `<div>${n.body}</div>` : "", images: [] };
   };
 
   useEffect(() => {
@@ -937,21 +944,26 @@ function NotesView({ notes, saveNotes }) {
     const norm = normalizeNote(n);
     setActive(n.id);
     setDraftTitle(norm.title);
-    setDraftText(norm.text);
+    setDraftHtml(norm.html);
     setDraftImages(norm.images);
-    setDraftTextSize(norm.textSize || "normal");
     setSelectedId(null);
+    // Seed the editor's DOM directly once — we never re-render its
+    // innerHTML on every keystroke, which is what caused freezing before.
+    requestAnimationFrame(() => {
+      if (editorRef.current) editorRef.current.innerHTML = norm.html;
+    });
   };
 
   const newNote = async () => {
-    const n = { id: Date.now().toString(), title: "Untitled", text: "", images: [], textSize: "normal", updated: Date.now() };
+    const n = { id: Date.now().toString(), title: "Untitled", html: "", images: [], updated: Date.now() };
     await saveNotes([n, ...notes]);
     openNote(n);
   };
 
-  const saveActive = async (images = draftImages, text = draftText, title = draftTitle, textSize = draftTextSize) => {
+  const saveActive = async (images = draftImages, title = draftTitle) => {
+    const html = editorRef.current ? editorRef.current.innerHTML : draftHtml;
     const next = notes.map((n) =>
-      n.id === active ? { ...n, title: title || "Untitled", text, body: text, images, textSize, updated: Date.now() } : n
+      n.id === active ? { ...n, title: title || "Untitled", html, body: stripHtml(html), images, updated: Date.now() } : n
     );
     await saveNotes(next);
   };
@@ -1140,12 +1152,21 @@ function NotesView({ notes, saveNotes }) {
 
   const previewFor = (n) => {
     const norm = normalizeNote(n);
-    return norm.text.trim() || "Empty note";
+    return stripHtml(norm.html).trim() || "Empty note";
   };
 
   const thumbFor = (n) => {
     const norm = normalizeNote(n);
     return norm.images.length > 0 ? norm.images[0].src : null;
+  };
+
+  // Formatting commands act only on the current text selection, which is
+  // exactly what makes bold/italic/size/color apply to just the highlighted
+  // text rather than the whole note.
+  const exec = (command, value = null) => {
+    editorRef.current?.focus();
+    document.execCommand(command, false, value);
+    saveActive();
   };
 
   const canvasHeight = Math.max(280, ...draftImages.map((im) => im.y + im.height + 20), 0);
@@ -1166,29 +1187,34 @@ function NotesView({ notes, saveNotes }) {
           </button>
         </div>
 
-        <div className="flex items-center gap-1 mb-2 pb-2 border-b border-[#DDD3BD]">
-          <span className="text-xs text-[#8A8071] mr-1">Text size:</span>
-          {[
-            { id: "small", label: "S" },
-            { id: "normal", label: "M" },
-            { id: "large", label: "L" },
-          ].map((s) => (
-            <button
-              key={s.id}
-              onClick={() => {
-                setDraftTextSize(s.id);
-                saveActive(draftImages, draftText, draftTitle, s.id);
-              }}
-              style={draftTextSize === s.id ? { backgroundColor: "var(--accent)" } : {}}
-              className={`w-7 h-7 rounded text-xs font-medium transition-colors ${
-                draftTextSize === s.id ? "text-white" : "bg-[#F6F1E7] text-[#2E2A24] hover:bg-[#EDE6D6]"
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-          <span className="text-xs text-[#8A8071] ml-3">Tap a photo to move, resize, or remove it</span>
+        <div className="flex items-center gap-1 mb-2 pb-2 border-b border-[#DDD3BD] flex-wrap">
+          <button onClick={() => exec("bold")} className="w-7 h-7 rounded hover:bg-[#F6F1E7] font-bold text-sm" title="Bold">B</button>
+          <button onClick={() => exec("italic")} className="w-7 h-7 rounded hover:bg-[#F6F1E7] italic text-sm" title="Italic">I</button>
+          <button onClick={() => exec("underline")} className="w-7 h-7 rounded hover:bg-[#F6F1E7] underline text-sm" title="Underline">U</button>
+          <div className="w-px h-5 bg-[#DDD3BD] mx-1" />
+          <select
+            onChange={(e) => { if (e.target.value) exec("fontSize", e.target.value); e.target.value = ""; }}
+            defaultValue=""
+            className="text-xs bg-white border border-[#DDD3BD] rounded px-1.5 py-1 outline-none h-7"
+            title="Size of the selected text"
+          >
+            <option value="" disabled>Size</option>
+            <option value="2">Small</option>
+            <option value="3">Normal</option>
+            <option value="5">Large</option>
+            <option value="7">Huge</option>
+          </select>
+          <label className="relative w-7 h-7 rounded hover:bg-[#F6F1E7] flex items-center justify-center cursor-pointer" title="Color of the selected text">
+            <span className="text-sm font-medium" style={{ color: "var(--accent)" }}>A</span>
+            <input
+              type="color"
+              onChange={(e) => exec("foreColor", e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer"
+            />
+          </label>
+          <span className="text-xs text-[#8A8071] ml-2">Highlight text first, then pick a style</span>
         </div>
+        <p className="text-xs text-[#8A8071] mb-2">Tap a photo on the page to move, resize, or remove it.</p>
 
         <div
           ref={canvasRef}
@@ -1201,17 +1227,17 @@ function NotesView({ notes, saveNotes }) {
             isDragOver ? "border-[var(--accent)] border-dashed bg-[#F6F1E7]" : "border-[#DDD3BD] border-dashed bg-white"
           }`}
         >
-          {/* Text layer fills the canvas; images can sit above (front) or below (back) it via z-index */}
-          <textarea
-            value={draftText}
-            onChange={(e) => setDraftText(e.target.value)}
+          {/* Text layer fills the canvas; images can sit above (front) or below (back) it via z-index.
+              This div is intentionally uncontrolled — its content is seeded once when the note opens
+              (see openNote) and only read back out on save, never re-rendered while typing. */}
+          <div
+            ref={editorRef}
+            contentEditable
+            suppressContentEditableWarning
             onBlur={() => saveActive()}
-            placeholder="Write your note… drag a photo anywhere on this page"
-            style={{
-              zIndex: 5,
-              fontSize: draftTextSize === "small" ? "12px" : draftTextSize === "large" ? "18px" : "14px",
-            }}
-            className="absolute inset-0 w-full h-full bg-transparent outline-none resize-none p-3 leading-relaxed"
+            data-placeholder="Write your note… drag a photo anywhere on this page"
+            style={{ zIndex: 5 }}
+            className="absolute inset-0 w-full h-full bg-transparent outline-none p-3 leading-relaxed text-sm overflow-auto notes-editor"
           />
 
           {draftImages.map((img) => {
