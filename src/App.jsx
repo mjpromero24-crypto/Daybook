@@ -88,8 +88,8 @@ export default function DailyCompanion() {
   const cardText = getLuminance(cardBg) < 0.45 ? "#F2EDE3" : "#2E2A24";
 
   return (
-    <div className={`min-h-screen w-full flex flex-col ${glossy ? "glossy-mode" : ""}`} style={{ "--accent": accent, "--card-bg": cardBg, "--card-text": cardText, background: bgStyle, color: pageText }}>
-      <header className="border-b border-[#DDD3BD] px-6 py-5 flex items-center justify-between relative" style={{ backgroundColor: glossy ? `color-mix(in srgb, ${headerBg} 55%, transparent)` : headerBg, color: getLuminance(headerBg) < 0.45 ? "#F2EDE3" : "#2E2A24" }}>
+    <div className={`min-h-screen w-full overflow-x-hidden flex flex-col ${glossy ? "glossy-mode" : ""}`} style={{ "--accent": accent, "--card-bg": cardBg, "--card-text": cardText, background: bgStyle, color: pageText }}>
+      <header className="border-b border-[#DDD3BD] px-6 py-5 flex items-center justify-between gap-3 relative min-w-0" style={{ backgroundColor: glossy ? `color-mix(in srgb, ${headerBg} 55%, transparent)` : headerBg, color: getLuminance(headerBg) < 0.45 ? "#F2EDE3" : "#2E2A24" }}>
         <div>
           {editingName ? (
             <div className="flex items-center gap-2">
@@ -139,12 +139,12 @@ export default function DailyCompanion() {
         <div className="text-xs text-[#8A8071]">{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
       </header>
 
-      <nav className="flex border-b border-[#DDD3BD] px-2" style={{ backgroundColor: glossy ? `color-mix(in srgb, ${navBg} 55%, transparent)` : navBg }}>
+      <nav className="flex border-b border-[#DDD3BD] px-2 overflow-x-auto" style={{ backgroundColor: glossy ? `color-mix(in srgb, ${navBg} 55%, transparent)` : navBg }}>
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-all active:scale-95 ${
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-all active:scale-95 shrink-0 whitespace-nowrap ${
               tab === id
                 ? "border-[var(--accent)] text-[var(--accent)]"
                 : "border-transparent text-[#8A8071] hover:text-[#2E2A24]"
@@ -156,7 +156,7 @@ export default function DailyCompanion() {
         ))}
       </nav>
 
-      <main className="flex-1 px-4 py-6 md:px-8 max-w-3xl w-full mx-auto">
+      <main className="flex-1 px-4 py-6 md:px-8 max-w-3xl w-full mx-auto min-w-0">
         {!ready ? (
           <div className="text-center text-[#8A8071] py-20 text-sm">Loading your daybook…</div>
         ) : (
