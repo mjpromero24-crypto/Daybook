@@ -870,9 +870,12 @@ function NotesView({ notes, saveNotes }) {
   const [active, setActive] = useState(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
-  const [draftImages, setDraftImages] = useState([]);
+  const [draftImages, setDraftImages] = useState([]); // [{id, src, x, y, width, height}]
   const [uploading, setUploading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
+  const canvasRef = useRef(null);
+  const activeManipRef = useRef(null); // { id, mode: 'move'|'resize', startX, startY, orig }
 
   const openNote = (n) => {
     setActive(n.id);
@@ -922,7 +925,7 @@ function NotesView({ notes, saveNotes }) {
           canvas.height = height;
           const ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL("image/jpeg", 0.75));
+          resolve({ src: canvas.toDataURL("image/jpeg", 0.75), aspect: width / height });
         };
         img.onerror = reject;
         img.src = reader.result;
@@ -931,15 +934,32 @@ function NotesView({ notes, saveNotes }) {
       reader.readAsDataURL(file);
     });
 
+  const addCompressedImages = async (results, dropPoint) => {
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+    const baseWidth = 160;
+    const next = [...draftImages];
+    results.forEach((r, i) => {
+      const w = baseWidth;
+      const h = Math.round(baseWidth / r.aspect);
+      let x = 16 + i * 20;
+      let y = 16 + i * 20;
+      if (dropPoint && canvasRect) {
+        x = Math.max(0, Math.min(dropPoint.x - canvasRect.left - w / 2, canvasRect.width - w));
+        y = Math.max(0, dropPoint.y - canvasRect.top - h / 2);
+      }
+      next.push({ id: `${Date.now()}-${i}`, src: r.src, x, y, width: w, height: h });
+    });
+    setDraftImages(next);
+    await saveActive(next);
+  };
+
   const handleAddImage = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     setUploading(true);
     try {
       const compressed = await Promise.all(files.map(compressImage));
-      const nextImages = [...draftImages, ...compressed];
-      setDraftImages(nextImages);
-      await saveActive(nextImages);
+      await addCompressedImages(compressed);
     } catch (err) {
       console.error("Image upload error:", err);
     } finally {
@@ -948,11 +968,94 @@ function NotesView({ notes, saveNotes }) {
     }
   };
 
-  const removeImage = async (index) => {
-    const nextImages = draftImages.filter((_, i) => i !== index);
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith("image/"));
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const compressed = await Promise.all(files.map(compressImage));
+      await addCompressedImages(compressed, { x: e.clientX, y: e.clientY });
+    } catch (err) {
+      console.error("Image drop error:", err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeImage = async (id) => {
+    const nextImages = draftImages.filter((img) => img.id !== id);
     setDraftImages(nextImages);
     await saveActive(nextImages);
   };
+
+  const startManipulate = (e, id, mode) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const point = e.touches ? e.touches[0] : e;
+    const img = draftImages.find((im) => im.id === id);
+    if (!img) return;
+    activeManipRef.current = {
+      id,
+      mode,
+      startX: point.clientX,
+      startY: point.clientY,
+      orig: { ...img },
+    };
+
+    const handleMove = (ev) => {
+      const m = activeManipRef.current;
+      if (!m) return;
+      const p = ev.touches ? ev.touches[0] : ev;
+      const dx = p.clientX - m.startX;
+      const dy = p.clientY - m.startY;
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+
+      setDraftImages((prev) =>
+        prev.map((im) => {
+          if (im.id !== m.id) return im;
+          if (m.mode === "move") {
+            let x = m.orig.x + dx;
+            let y = m.orig.y + dy;
+            if (canvasRect) {
+              x = Math.max(0, Math.min(x, canvasRect.width - im.width));
+              y = Math.max(0, y);
+            }
+            return { ...im, x, y };
+          } else {
+            const aspect = m.orig.width / m.orig.height;
+            const width = Math.max(40, m.orig.width + dx);
+            const height = Math.round(width / aspect);
+            return { ...im, width, height };
+          }
+        })
+      );
+    };
+
+    const handleUp = () => {
+      activeManipRef.current = null;
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("touchmove", handleMove);
+      window.removeEventListener("touchend", handleUp);
+      setDraftImages((current) => {
+        saveActive(current);
+        return current;
+      });
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("touchmove", handleMove, { passive: false });
+    window.addEventListener("touchend", handleUp);
+  };
+
+  const canvasHeight = Math.max(
+    220,
+    ...draftImages.map((im) => im.y + im.height + 24),
+    0
+  );
 
   if (active) {
     return (
@@ -974,26 +1077,56 @@ function NotesView({ notes, saveNotes }) {
           onChange={(e) => setDraftBody(e.target.value)}
           onBlur={() => saveActive()}
           placeholder="Write your note…"
-          rows={10}
+          rows={8}
           className="w-full bg-white border border-[#DDD3BD] rounded px-3 py-2 text-sm outline-none focus:border-[var(--accent)] resize-none mb-3"
         />
 
-        {draftImages.length > 0 && (
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            {draftImages.map((src, i) => (
-              <div key={i} className="relative group">
-                <img src={src} alt="" className="w-full aspect-square object-cover rounded border border-[#DDD3BD]" />
-                <button
-                  onClick={() => removeImage(i)}
-                  className="absolute -top-1.5 -right-1.5 bg-[#2E2A24] text-white rounded-full p-0.5 shadow"
-                  title="Remove photo"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <p className="text-xs text-[#8A8071] mb-1.5">Photos — drag to move, drag the corner to resize</p>
+        <div
+          ref={canvasRef}
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleDrop}
+          style={{ height: canvasHeight }}
+          className={`relative w-full bg-white border-2 rounded-lg mb-3 overflow-hidden transition-colors ${
+            isDragOver ? "border-[var(--accent)] border-dashed bg-[#F6F1E7]" : "border-[#DDD3BD] border-dashed"
+          }`}
+        >
+          {draftImages.length === 0 && (
+            <p className="absolute inset-0 flex items-center justify-center text-xs text-[#8A8071] px-4 text-center">
+              Drag a photo here, or use "Add a photo" below
+            </p>
+          )}
+          {draftImages.map((img) => (
+            <div
+              key={img.id}
+              style={{ left: img.x, top: img.y, width: img.width, height: img.height, position: "absolute" }}
+              className="group touch-none"
+            >
+              <img
+                src={img.src}
+                alt=""
+                onPointerDown={(e) => startManipulate(e, img.id, "move")}
+                onTouchStart={(e) => startManipulate(e, img.id, "move")}
+                className="w-full h-full object-cover rounded shadow-sm cursor-move select-none no-select"
+                draggable={false}
+              />
+              <button
+                onClick={() => removeImage(img.id)}
+                className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow opacity-0 group-hover:opacity-100 transition-opacity"
+                title="Remove photo"
+              >
+                <X size={12} />
+              </button>
+              <div
+                onPointerDown={(e) => startManipulate(e, img.id, "resize")}
+                onTouchStart={(e) => startManipulate(e, img.id, "resize")}
+                className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-[var(--accent)] rounded-full cursor-nwse-resize border-2 border-white shadow"
+                title="Resize"
+              />
+            </div>
+          ))}
+        </div>
 
         <input
           ref={fileInputRef}
@@ -1027,7 +1160,7 @@ function NotesView({ notes, saveNotes }) {
           <Card key={n.id} className="p-3 flex items-center justify-between cursor-pointer hover:border-[var(--accent)]" >
             <div onClick={() => openNote(n)} className="flex-1 flex items-center gap-3 min-w-0">
               {n.images && n.images.length > 0 && (
-                <img src={n.images[0]} alt="" className="w-10 h-10 rounded object-cover shrink-0 border border-[#DDD3BD]" />
+                <img src={n.images[0].src} alt="" className="w-10 h-10 rounded object-cover shrink-0 border border-[#DDD3BD]" />
               )}
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate">{n.title}</p>
