@@ -331,27 +331,27 @@ function CalendarView({ events, saveEvents }) {
             </div>
           ))}
         </div>
-        <div className="flex gap-2">
-          <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-[10px] text-[#8A8071] px-0.5">Time (optional)</label>
             <input
               type="time"
               value={draftTime}
               onChange={(e) => setDraftTime(e.target.value)}
-              className="bg-white border border-[#DDD3BD] rounded px-2 py-2 text-sm outline-none focus:border-[var(--accent)] w-32"
+              className="bg-white border border-[#DDD3BD] rounded px-2 py-2 text-sm outline-none focus:border-[var(--accent)] w-full sm:w-32"
             />
           </div>
-          <div className="flex flex-col gap-1 flex-1">
+          <div className="flex flex-col gap-1 flex-1 min-w-0 w-full sm:w-auto">
             <label className="text-[10px] text-[#8A8071] px-0.5">Event</label>
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addEvent()}
               placeholder="Add an event…"
-              className="bg-white border border-[#DDD3BD] rounded px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+              className="bg-white border border-[#DDD3BD] rounded px-3 py-2 text-sm outline-none focus:border-[var(--accent)] w-full"
             />
           </div>
-          <button onClick={addEvent} className="bg-[var(--accent)] text-white rounded px-3 py-2 text-sm font-medium hover:opacity-90 self-end">
+          <button onClick={addEvent} className="bg-[var(--accent)] text-white rounded px-3 py-2 text-sm font-medium hover:opacity-90 w-full sm:w-auto sm:self-end">
             Add
           </button>
         </div>
