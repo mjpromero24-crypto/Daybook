@@ -71,6 +71,7 @@ export default function DailyCompanion() {
   const [accent, saveAccent, accentLoaded] = useStore("companion:accent", "#A9684F");
   const [bgTop, saveBgTop, bgTopLoaded] = useStore("companion:bgtop", "#F6F1E7");
   const [bgBottom, saveBgBottom, bgBottomLoaded] = useStore("companion:bgbottom", "#F6F1E7");
+  const [bgImage, saveBgImage, bgImageLoaded] = useStore("companion:bgimage", null);
   const [textMode, saveTextMode, textModeLoaded] = useStore("companion:textmode", "auto");
   const [customText, saveCustomText, customTextLoaded] = useStore("companion:customtext", "#2E2A24");
   const [glossy, saveGlossy, glossyLoaded] = useStore("companion:glossy", false);
@@ -81,10 +82,12 @@ export default function DailyCompanion() {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
 
-  const ready = eventsLoaded && todosLoaded && habitsLoaded && notesLoaded && diaryLoaded && appNameLoaded && accentLoaded && bgTopLoaded && bgBottomLoaded && textModeLoaded && customTextLoaded && glossyLoaded && headerBgLoaded && navBgLoaded && cardBgLoaded;
+  const ready = eventsLoaded && todosLoaded && habitsLoaded && notesLoaded && diaryLoaded && appNameLoaded && accentLoaded && bgTopLoaded && bgBottomLoaded && bgImageLoaded && textModeLoaded && customTextLoaded && glossyLoaded && headerBgLoaded && navBgLoaded && cardBgLoaded;
   const avgLuminance = (getLuminance(bgTop) + getLuminance(bgBottom)) / 2;
   const pageText = textMode === "custom" ? customText : (avgLuminance < 0.45 ? "#F2EDE3" : "#2E2A24");
-  const bgStyle = bgTop === bgBottom ? bgTop : `linear-gradient(180deg, ${bgTop}, ${bgBottom})`;
+  const bgStyle = bgImage
+    ? `url(${bgImage}) center/cover no-repeat fixed`
+    : (bgTop === bgBottom ? bgTop : `linear-gradient(180deg, ${bgTop}, ${bgBottom})`);
   const cardText = getLuminance(cardBg) < 0.45 ? "#F2EDE3" : "#2E2A24";
 
   return (
@@ -174,6 +177,8 @@ export default function DailyCompanion() {
                 saveBgTop={saveBgTop}
                 bgBottom={bgBottom}
                 saveBgBottom={saveBgBottom}
+                bgImage={bgImage}
+                saveBgImage={saveBgImage}
                 textMode={textMode}
                 saveTextMode={saveTextMode}
                 customText={customText}
@@ -1398,10 +1403,60 @@ function NotesView({ notes, saveNotes }) {
 function SettingsView({
   accent, saveAccent,
   bgTop, saveBgTop, bgBottom, saveBgBottom,
+  bgImage, saveBgImage,
   textMode, saveTextMode, customText, saveCustomText,
   glossy, saveGlossy,
   headerBg, saveHeaderBg, navBg, saveNavBg, cardBg, saveCardBg,
 }) {
+  const bgFileInputRef = useRef(null);
+  const [uploadingBg, setUploadingBg] = useState(false);
+
+  const compressBgImage = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1600;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", 0.8));
+        };
+        img.onerror = reject;
+        img.src = reader.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const handleBgUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingBg(true);
+    try {
+      const dataUrl = await compressBgImage(file);
+      await saveBgImage(dataUrl);
+    } catch (err) {
+      console.error("Background upload error:", err);
+    } finally {
+      setUploadingBg(false);
+      if (bgFileInputRef.current) bgFileInputRef.current.value = "";
+    }
+  };
+
   return (
     <div className="space-y-5">
       <Card className="p-4">
@@ -1430,26 +1485,61 @@ function SettingsView({
 
       <Card className="p-4">
         <p className="text-sm font-medium mb-1">Page background</p>
-        <p className="text-xs text-[#8A8071] mb-3">The outermost background. Set one color for solid, or two for a top-to-bottom gradient.</p>
-        <div className="grid grid-cols-2 gap-3 mb-2">
-          <div>
-            <p className="text-xs text-[#8A8071] mb-1.5">Top</p>
-            <div className="flex items-center gap-2">
-              <input type="color" value={bgTop} onChange={(e) => saveBgTop(e.target.value)} className="w-10 h-10 rounded cursor-pointer border border-[#DDD3BD]" />
-              <input type="text" value={bgTop} onChange={(e) => saveBgTop(e.target.value)} className="flex-1 w-0 bg-white border border-[#DDD3BD] rounded px-2 py-2 text-xs outline-none focus:border-[var(--accent)] font-mono" />
+        <p className="text-xs text-[#8A8071] mb-3">Use your own photo as the background, or pick colors for a solid fill or gradient.</p>
+
+        {bgImage ? (
+          <div className="mb-3">
+            <img src={bgImage} alt="Background preview" className="w-full h-28 object-cover rounded-lg border border-[#DDD3BD] mb-2" />
+            <div className="flex gap-2">
+              <button
+                onClick={() => bgFileInputRef.current?.click()}
+                disabled={uploadingBg}
+                className="flex-1 text-sm bg-[#F6F1E7] hover:bg-[#EDE6D6] text-[#2E2A24] rounded-lg px-3 py-2 transition-colors disabled:opacity-50"
+              >
+                {uploadingBg ? "Uploading…" : "Change photo"}
+              </button>
+              <button
+                onClick={() => saveBgImage(null)}
+                className="text-sm text-[#8A8071] hover:text-[var(--accent)] border border-[#DDD3BD] rounded-lg px-3 py-2"
+              >
+                Remove
+              </button>
             </div>
           </div>
-          <div>
-            <p className="text-xs text-[#8A8071] mb-1.5">Bottom</p>
-            <div className="flex items-center gap-2">
-              <input type="color" value={bgBottom} onChange={(e) => saveBgBottom(e.target.value)} className="w-10 h-10 rounded cursor-pointer border border-[#DDD3BD]" />
-              <input type="text" value={bgBottom} onChange={(e) => saveBgBottom(e.target.value)} className="flex-1 w-0 bg-white border border-[#DDD3BD] rounded px-2 py-2 text-xs outline-none focus:border-[var(--accent)] font-mono" />
+        ) : (
+          <button
+            onClick={() => bgFileInputRef.current?.click()}
+            disabled={uploadingBg}
+            className="flex items-center gap-1.5 text-sm text-[#8A8071] hover:text-[var(--accent)] border border-dashed border-[#DDD3BD] rounded-lg px-3 py-2 w-full justify-center transition-colors mb-3 disabled:opacity-50"
+          >
+            <ImageIcon size={15} />
+            {uploadingBg ? "Uploading…" : "Upload a background photo"}
+          </button>
+        )}
+        <input ref={bgFileInputRef} type="file" accept="image/*" onChange={handleBgUpload} className="hidden" />
+
+        <div className={bgImage ? "opacity-40 pointer-events-none" : ""}>
+          <p className="text-xs text-[#8A8071] mb-2">Or use a color fill instead — set one color for solid, or two for a top-to-bottom gradient.</p>
+          <div className="grid grid-cols-2 gap-3 mb-2">
+            <div>
+              <p className="text-xs text-[#8A8071] mb-1.5">Top</p>
+              <div className="flex items-center gap-2">
+                <input type="color" value={bgTop} onChange={(e) => saveBgTop(e.target.value)} className="w-10 h-10 rounded cursor-pointer border border-[#DDD3BD]" />
+                <input type="text" value={bgTop} onChange={(e) => saveBgTop(e.target.value)} className="flex-1 w-0 bg-white border border-[#DDD3BD] rounded px-2 py-2 text-xs outline-none focus:border-[var(--accent)] font-mono" />
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-[#8A8071] mb-1.5">Bottom</p>
+              <div className="flex items-center gap-2">
+                <input type="color" value={bgBottom} onChange={(e) => saveBgBottom(e.target.value)} className="w-10 h-10 rounded cursor-pointer border border-[#DDD3BD]" />
+                <input type="text" value={bgBottom} onChange={(e) => saveBgBottom(e.target.value)} className="flex-1 w-0 bg-white border border-[#DDD3BD] rounded px-2 py-2 text-xs outline-none focus:border-[var(--accent)] font-mono" />
+              </div>
             </div>
           </div>
+          <button onClick={() => saveBgBottom(bgTop)} className="text-xs text-[#8A8071] hover:text-[var(--accent)] underline">
+            Use solid color instead
+          </button>
         </div>
-        <button onClick={() => saveBgBottom(bgTop)} className="text-xs text-[#8A8071] hover:text-[var(--accent)] underline">
-          Use solid color instead
-        </button>
       </Card>
 
       <Card className="p-4">
@@ -1529,6 +1619,7 @@ function SettingsView({
           saveAccent("#A9684F");
           saveBgTop("#F6F1E7");
           saveBgBottom("#F6F1E7");
+          saveBgImage(null);
           saveTextMode("auto");
           saveGlossy(false);
           saveHeaderBg("#FBF8F1");
