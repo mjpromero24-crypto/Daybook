@@ -217,6 +217,17 @@ export default function DailyCompanion() {
           backdrop-filter: blur(14px) saturate(140%);
           -webkit-backdrop-filter: blur(14px) saturate(140%);
         }
+        .notes-editor:empty:before {
+          content: attr(data-placeholder);
+          color: #8A8071;
+          pointer-events: none;
+        }
+        .notes-editor img {
+          cursor: grab;
+        }
+        .notes-editor {
+          line-height: 1.6;
+        }
       `}</style>
     </div>
   );
@@ -869,30 +880,39 @@ function TrackerView({ habits, saveHabits }) {
 function NotesView({ notes, saveNotes }) {
   const [active, setActive] = useState(null);
   const [draftTitle, setDraftTitle] = useState("");
-  const [draftBody, setDraftBody] = useState("");
-  const [draftImages, setDraftImages] = useState([]); // [{id, src, x, y, width, height}]
+  const [draftHtml, setDraftHtml] = useState("");
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
-  const canvasRef = useRef(null);
-  const activeManipRef = useRef(null); // { id, mode: 'move'|'resize', startX, startY, orig }
+  const editorRef = useRef(null);
+  const savedRangeRef = useRef(null);
+
+  const stripHtml = (html) => {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html || "";
+    return tmp.textContent || "";
+  };
+
+  const firstImageSrc = (html) => {
+    const match = (html || "").match(/<img[^>]+src="([^"]+)"/);
+    return match ? match[1] : null;
+  };
 
   const openNote = (n) => {
     setActive(n.id);
     setDraftTitle(n.title);
-    setDraftBody(n.body);
-    setDraftImages(n.images || []);
+    setDraftHtml(n.bodyHtml || (n.body ? `<p>${n.body}</p>` : ""));
   };
 
   const newNote = async () => {
-    const n = { id: Date.now().toString(), title: "Untitled", body: "", images: [], updated: Date.now() };
+    const n = { id: Date.now().toString(), title: "Untitled", bodyHtml: "", updated: Date.now() };
     await saveNotes([n, ...notes]);
     openNote(n);
   };
 
-  const saveActive = async (images = draftImages) => {
+  const saveActive = async (html = draftHtml) => {
     const next = notes.map((n) =>
-      n.id === active ? { ...n, title: draftTitle || "Untitled", body: draftBody, images, updated: Date.now() } : n
+      n.id === active ? { ...n, title: draftTitle || "Untitled", bodyHtml: html, body: stripHtml(html), updated: Date.now() } : n
     );
     await saveNotes(next);
   };
@@ -902,14 +922,27 @@ function NotesView({ notes, saveNotes }) {
     if (active === id) setActive(null);
   };
 
-  // Resize/compress the image before storing, so photos don't blow up local storage
+  const handleEditorInput = () => {
+    if (editorRef.current) setDraftHtml(editorRef.current.innerHTML);
+  };
+
+  const handleEditorBlur = () => {
+    if (editorRef.current) saveActive(editorRef.current.innerHTML);
+  };
+
+  const exec = (command, value = null) => {
+    editorRef.current?.focus();
+    document.execCommand(command, false, value);
+    handleEditorInput();
+  };
+
   const compressImage = (file) =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const img = new Image();
         img.onload = () => {
-          const maxDim = 1000;
+          const maxDim = 700;
           let { width, height } = img;
           if (width > maxDim || height > maxDim) {
             if (width > height) {
@@ -925,7 +958,7 @@ function NotesView({ notes, saveNotes }) {
           canvas.height = height;
           const ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, width, height);
-          resolve({ src: canvas.toDataURL("image/jpeg", 0.75), aspect: width / height });
+          resolve(canvas.toDataURL("image/jpeg", 0.75));
         };
         img.onerror = reject;
         img.src = reader.result;
@@ -934,128 +967,80 @@ function NotesView({ notes, saveNotes }) {
       reader.readAsDataURL(file);
     });
 
-  const addCompressedImages = async (results, dropPoint) => {
-    const canvasRect = canvasRef.current?.getBoundingClientRect();
-    const baseWidth = 160;
-    const next = [...draftImages];
-    results.forEach((r, i) => {
-      const w = baseWidth;
-      const h = Math.round(baseWidth / r.aspect);
-      let x = 16 + i * 20;
-      let y = 16 + i * 20;
-      if (dropPoint && canvasRect) {
-        x = Math.max(0, Math.min(dropPoint.x - canvasRect.left - w / 2, canvasRect.width - w));
-        y = Math.max(0, dropPoint.y - canvasRect.top - h / 2);
-      }
-      next.push({ id: `${Date.now()}-${i}`, src: r.src, x, y, width: w, height: h });
-    });
-    setDraftImages(next);
-    await saveActive(next);
+  const insertImageAtCursor = (src) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    const sel = window.getSelection();
+    if (savedRangeRef.current) {
+      sel.removeAllRanges();
+      sel.addRange(savedRangeRef.current);
+    }
+    document.execCommand(
+      "insertHTML",
+      false,
+      `<img src="${src}" style="max-width:100%;width:260px;height:auto;border-radius:6px;display:inline-block;margin:4px 0;" />`
+    );
+    handleEditorInput();
   };
 
-  const handleAddImage = async (e) => {
+  const handlePickImage = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     setUploading(true);
     try {
-      const compressed = await Promise.all(files.map(compressImage));
-      await addCompressedImages(compressed);
+      for (const file of files) {
+        const src = await compressImage(file);
+        insertImageAtCursor(src);
+      }
+      saveActive(editorRef.current?.innerHTML);
     } catch (err) {
-      console.error("Image upload error:", err);
+      console.error("Image insert error:", err);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  const handleDrop = async (e) => {
+  const openFilePicker = () => {
+    // Save current cursor position before the file dialog steals focus
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) savedRangeRef.current = sel.getRangeAt(0);
+    fileInputRef.current?.click();
+  };
+
+  const handleEditorDrop = async (e) => {
     e.preventDefault();
     setIsDragOver(false);
     const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith("image/"));
     if (files.length === 0) return;
+
+    // Place the cursor at the exact drop point so the image lands where the user dropped it
+    let range = null;
+    if (document.caretRangeFromPoint) {
+      range = document.caretRangeFromPoint(e.clientX, e.clientY);
+    } else if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(e.clientX, e.clientY);
+      if (pos) {
+        range = document.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+      }
+    }
+    if (range) savedRangeRef.current = range;
+
     setUploading(true);
     try {
-      const compressed = await Promise.all(files.map(compressImage));
-      await addCompressedImages(compressed, { x: e.clientX, y: e.clientY });
+      for (const file of files) {
+        const src = await compressImage(file);
+        insertImageAtCursor(src);
+      }
+      saveActive(editorRef.current?.innerHTML);
     } catch (err) {
       console.error("Image drop error:", err);
     } finally {
       setUploading(false);
     }
   };
-
-  const removeImage = async (id) => {
-    const nextImages = draftImages.filter((img) => img.id !== id);
-    setDraftImages(nextImages);
-    await saveActive(nextImages);
-  };
-
-  const startManipulate = (e, id, mode) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const point = e.touches ? e.touches[0] : e;
-    const img = draftImages.find((im) => im.id === id);
-    if (!img) return;
-    activeManipRef.current = {
-      id,
-      mode,
-      startX: point.clientX,
-      startY: point.clientY,
-      orig: { ...img },
-    };
-
-    const handleMove = (ev) => {
-      const m = activeManipRef.current;
-      if (!m) return;
-      const p = ev.touches ? ev.touches[0] : ev;
-      const dx = p.clientX - m.startX;
-      const dy = p.clientY - m.startY;
-      const canvasRect = canvasRef.current?.getBoundingClientRect();
-
-      setDraftImages((prev) =>
-        prev.map((im) => {
-          if (im.id !== m.id) return im;
-          if (m.mode === "move") {
-            let x = m.orig.x + dx;
-            let y = m.orig.y + dy;
-            if (canvasRect) {
-              x = Math.max(0, Math.min(x, canvasRect.width - im.width));
-              y = Math.max(0, y);
-            }
-            return { ...im, x, y };
-          } else {
-            const aspect = m.orig.width / m.orig.height;
-            const width = Math.max(40, m.orig.width + dx);
-            const height = Math.round(width / aspect);
-            return { ...im, width, height };
-          }
-        })
-      );
-    };
-
-    const handleUp = () => {
-      activeManipRef.current = null;
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-      window.removeEventListener("touchmove", handleMove);
-      window.removeEventListener("touchend", handleUp);
-      setDraftImages((current) => {
-        saveActive(current);
-        return current;
-      });
-    };
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
-    window.addEventListener("touchmove", handleMove, { passive: false });
-    window.addEventListener("touchend", handleUp);
-  };
-
-  const canvasHeight = Math.max(
-    220,
-    ...draftImages.map((im) => im.y + im.height + 24),
-    0
-  );
 
   if (active) {
     return (
@@ -1072,78 +1057,60 @@ function NotesView({ notes, saveNotes }) {
             <X size={18} />
           </button>
         </div>
-        <textarea
-          value={draftBody}
-          onChange={(e) => setDraftBody(e.target.value)}
-          onBlur={() => saveActive()}
-          placeholder="Write your note…"
-          rows={8}
-          className="w-full bg-white border border-[#DDD3BD] rounded px-3 py-2 text-sm outline-none focus:border-[var(--accent)] resize-none mb-3"
-        />
 
-        <p className="text-xs text-[#8A8071] mb-1.5">Photos — drag to move, drag the corner to resize</p>
-        <div
-          ref={canvasRef}
-          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={handleDrop}
-          style={{ height: canvasHeight }}
-          className={`relative w-full bg-white border-2 rounded-lg mb-3 overflow-hidden transition-colors ${
-            isDragOver ? "border-[var(--accent)] border-dashed bg-[#F6F1E7]" : "border-[#DDD3BD] border-dashed"
-          }`}
-        >
-          {draftImages.length === 0 && (
-            <p className="absolute inset-0 flex items-center justify-center text-xs text-[#8A8071] px-4 text-center">
-              Drag a photo here, or use "Add a photo" below
-            </p>
-          )}
-          {draftImages.map((img) => (
-            <div
-              key={img.id}
-              style={{ left: img.x, top: img.y, width: img.width, height: img.height, position: "absolute" }}
-              className="group touch-none"
-            >
-              <img
-                src={img.src}
-                alt=""
-                onPointerDown={(e) => startManipulate(e, img.id, "move")}
-                onTouchStart={(e) => startManipulate(e, img.id, "move")}
-                className="w-full h-full object-cover rounded shadow-sm cursor-move select-none no-select"
-                draggable={false}
-              />
-              <button
-                onClick={() => removeImage(img.id)}
-                className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow opacity-0 group-hover:opacity-100 transition-opacity"
-                title="Remove photo"
-              >
-                <X size={12} />
-              </button>
-              <div
-                onPointerDown={(e) => startManipulate(e, img.id, "resize")}
-                onTouchStart={(e) => startManipulate(e, img.id, "resize")}
-                className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-[var(--accent)] rounded-full cursor-nwse-resize border-2 border-white shadow"
-                title="Resize"
-              />
-            </div>
-          ))}
+        <div className="flex items-center gap-1 mb-2 pb-2 border-b border-[#DDD3BD] flex-wrap">
+          <button onClick={() => exec("bold")} className="px-2 py-1 rounded hover:bg-[#F6F1E7] font-bold text-sm" title="Bold">B</button>
+          <button onClick={() => exec("italic")} className="px-2 py-1 rounded hover:bg-[#F6F1E7] italic text-sm" title="Italic">I</button>
+          <button onClick={() => exec("underline")} className="px-2 py-1 rounded hover:bg-[#F6F1E7] underline text-sm" title="Underline">U</button>
+          <div className="w-px h-5 bg-[#DDD3BD] mx-1" />
+          <select
+            onChange={(e) => exec("fontSize", e.target.value)}
+            defaultValue=""
+            className="text-xs bg-white border border-[#DDD3BD] rounded px-1.5 py-1 outline-none"
+            title="Font size"
+          >
+            <option value="" disabled>Size</option>
+            <option value="2">Small</option>
+            <option value="3">Normal</option>
+            <option value="5">Large</option>
+            <option value="7">Huge</option>
+          </select>
+          <div className="w-px h-5 bg-[#DDD3BD] mx-1" />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handlePickImage}
+            className="hidden"
+          />
+          <button
+            onClick={openFilePicker}
+            disabled={uploading}
+            className="flex items-center gap-1 px-2 py-1 rounded hover:bg-[#F6F1E7] text-xs text-[#8A8071] hover:text-[var(--accent)] disabled:opacity-50"
+            title="Insert photo"
+          >
+            <ImageIcon size={14} />
+            {uploading ? "Adding…" : "Photo"}
+          </button>
         </div>
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={handleAddImage}
-          className="hidden"
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          onInput={handleEditorInput}
+          onBlur={handleEditorBlur}
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleEditorDrop}
+          dangerouslySetInnerHTML={{ __html: draftHtml }}
+          data-placeholder="Write your note, or drag a photo in…"
+          className={`min-h-[220px] w-full bg-white border rounded px-3 py-2 text-sm outline-none transition-colors notes-editor ${
+            isDragOver ? "border-[var(--accent)] border-dashed bg-[#F6F1E7]" : "border-[#DDD3BD]"
+          }`}
         />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          className="flex items-center gap-1.5 text-sm text-[#8A8071] hover:text-[var(--accent)] border border-dashed border-[#DDD3BD] rounded-lg px-3 py-2 w-full justify-center transition-colors disabled:opacity-50"
-        >
-          <ImageIcon size={15} />
-          {uploading ? "Adding photo…" : "Add a photo"}
-        </button>
+        <p className="text-xs text-[#8A8071] mt-2">Tip: click a photo inside the note to drag its corner and resize it.</p>
       </Card>
     );
   }
@@ -1156,22 +1123,26 @@ function NotesView({ notes, saveNotes }) {
       {notes.length === 0 ? (
         <p className="text-sm text-[#8A8071] text-center py-8">No notes yet.</p>
       ) : (
-        notes.map((n) => (
-          <Card key={n.id} className="p-3 flex items-center justify-between cursor-pointer hover:border-[var(--accent)]" >
-            <div onClick={() => openNote(n)} className="flex-1 flex items-center gap-3 min-w-0">
-              {n.images && n.images.length > 0 && (
-                <img src={n.images[0].src} alt="" className="w-10 h-10 rounded object-cover shrink-0 border border-[#DDD3BD]" />
-              )}
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{n.title}</p>
-                <p className="text-xs text-[#8A8071] truncate">{n.body || "Empty note"}</p>
+        notes.map((n) => {
+          const thumb = firstImageSrc(n.bodyHtml);
+          const preview = n.body || stripHtml(n.bodyHtml) || "Empty note";
+          return (
+            <Card key={n.id} className="p-3 flex items-center justify-between cursor-pointer hover:border-[var(--accent)]" >
+              <div onClick={() => openNote(n)} className="flex-1 flex items-center gap-3 min-w-0">
+                {thumb && (
+                  <img src={thumb} alt="" className="w-10 h-10 rounded object-cover shrink-0 border border-[#DDD3BD]" />
+                )}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{n.title}</p>
+                  <p className="text-xs text-[#8A8071] truncate">{preview}</p>
+                </div>
               </div>
-            </div>
-            <button onClick={() => removeNote(n.id)} className="text-[#8A8071] hover:text-[var(--accent)] ml-2 shrink-0">
-              <Trash2 size={14} />
-            </button>
-          </Card>
-        ))
+              <button onClick={() => removeNote(n.id)} className="text-[#8A8071] hover:text-[var(--accent)] ml-2 shrink-0">
+                <Trash2 size={14} />
+              </button>
+            </Card>
+          );
+        })
       )}
     </div>
   );
