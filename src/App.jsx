@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Calendar as CalendarIcon, CheckSquare, FileText, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, X, ListTodo, Briefcase, Home, Pencil, Check, Palette, Settings as SettingsIcon, GripVertical } from "lucide-react";
+import { Calendar as CalendarIcon, CheckSquare, FileText, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, X, ListTodo, Briefcase, Home, Pencil, Check, Palette, Settings as SettingsIcon, GripVertical } from "lucide-react";
 
 const ACCENTS = [
   { name: "Terracotta", value: "#A9684F" },
@@ -278,15 +278,35 @@ function CalendarView({ events, saveEvents }) {
   return (
     <div className="space-y-5">
       <Card className="p-4">
-        <div className="flex items-center justify-between mb-4">
-          <button onClick={() => setCursor(new Date(year, month - 1, 1))} className="p-1.5 rounded hover:bg-[#EDE6D6]">
-            <ChevronLeft size={18} />
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center">
+            <button onClick={() => setCursor(new Date(year - 1, month, 1))} className="p-1.5 rounded hover:bg-[#EDE6D6]" title="Previous year">
+              <ChevronsLeft size={16} />
+            </button>
+            <button onClick={() => setCursor(new Date(year, month - 1, 1))} className="p-1.5 rounded hover:bg-[#EDE6D6]" title="Previous month">
+              <ChevronLeft size={18} />
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              const now = new Date();
+              setCursor(now);
+              setSelected(todayKey(now));
+            }}
+            className="text-xs text-[#8A8071] hover:text-[var(--accent)] underline"
+          >
+            Today
           </button>
-          <span className="font-medium" style={{ fontFamily: "Georgia, serif" }}>{monthNames[month]} {year}</span>
-          <button onClick={() => setCursor(new Date(year, month + 1, 1))} className="p-1.5 rounded hover:bg-[#EDE6D6]">
-            <ChevronRight size={18} />
-          </button>
+          <div className="flex items-center">
+            <button onClick={() => setCursor(new Date(year, month + 1, 1))} className="p-1.5 rounded hover:bg-[#EDE6D6]" title="Next month">
+              <ChevronRight size={18} />
+            </button>
+            <button onClick={() => setCursor(new Date(year + 1, month, 1))} className="p-1.5 rounded hover:bg-[#EDE6D6]" title="Next year">
+              <ChevronsRight size={16} />
+            </button>
+          </div>
         </div>
+        <p className="text-center font-medium mb-4" style={{ fontFamily: "Georgia, serif" }}>{monthNames[month]} {year}</p>
         <div className="grid grid-cols-7 gap-1 text-center text-xs text-[#8A8071] mb-1">
           {dayNames.map((d, i) => <div key={i}>{d}</div>)}
         </div>
