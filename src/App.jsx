@@ -448,6 +448,7 @@ function TodoView({ todos, saveTodos }) {
   const rafRef = useRef(null);
   const pendingYRef = useRef(null);
   const longPressTimerRef = useRef(null);
+  const pressStartRef = useRef(null);
 
   const computeReorder = (id, y) => {
     setLocalOrder((prev) => {
@@ -524,9 +525,23 @@ function TodoView({ todos, saveTodos }) {
   // Long-press anywhere else on the row to start dragging
   const handleRowPointerDown = (e, id) => {
     if (e.target.closest("[data-no-drag]")) return;
+    const point = e.touches ? e.touches[0] : e;
+    pressStartRef.current = { x: point.clientX, y: point.clientY };
     longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
       beginDrag(id);
     }, 280);
+  };
+
+  const handleRowPointerMoveCheck = (e) => {
+    if (!longPressTimerRef.current || !pressStartRef.current) return;
+    const point = e.touches ? e.touches[0] : e;
+    const dx = Math.abs(point.clientX - pressStartRef.current.x);
+    const dy = Math.abs(point.clientY - pressStartRef.current.y);
+    // Only cancel the pending long-press if the finger moves more than a small jitter threshold
+    if (dx > 10 || dy > 10) {
+      cancelLongPress();
+    }
   };
 
   const cancelLongPress = () => {
@@ -534,6 +549,7 @@ function TodoView({ todos, saveTodos }) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+    pressStartRef.current = null;
   };
 
   return (
@@ -597,10 +613,11 @@ function TodoView({ todos, saveTodos }) {
                   className={`flex items-center justify-between rounded px-2 py-2 no-select ${isDragging ? "" : "transition-colors"}`}
                   onPointerDown={(e) => handleRowPointerDown(e, id)}
                   onTouchStart={(e) => handleRowPointerDown(e, id)}
+                  onPointerMove={handleRowPointerMoveCheck}
+                  onTouchMove={handleRowPointerMoveCheck}
                   onPointerUp={cancelLongPress}
                   onPointerLeave={cancelLongPress}
                   onTouchEnd={cancelLongPress}
-                  onTouchMove={cancelLongPress}
                 >
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <button
