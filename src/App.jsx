@@ -361,7 +361,7 @@ function CalendarView({ events, saveEvents }) {
 }
 
 function TodoView({ todos, saveTodos }) {
-  const [category, setCategory] = useState("work");
+  const [category, saveCategory, categoryLoaded] = useStore("companion:todocategory", "work");
   const [draft, setDraft] = useState("");
 
   const categories = [
@@ -395,7 +395,7 @@ function TodoView({ todos, saveTodos }) {
           return (
             <button
               key={id}
-              onClick={() => setCategory(id)}
+              onClick={() => saveCategory(id)}
               style={isActive ? { backgroundColor: color, borderColor: color } : { borderColor: "#DDD3BD" }}
               className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium border transition-all active:scale-95 ${
                 isActive ? "text-white" : "bg-[#FBF8F1] text-[#2E2A24] hover:border-[var(--accent)]"
