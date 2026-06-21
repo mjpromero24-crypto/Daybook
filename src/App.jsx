@@ -395,6 +395,32 @@ function TodoView({ todos, saveTodos }) {
   const [localOrder, setLocalOrder] = useState([]);
   const itemRefs = useRef({});
   const draggingRef = useRef(false);
+  const activeListenersRef = useRef(null);
+
+  // Safety net: if this view unmounts (e.g. switching tabs) while a drag
+  // or pending long-press is active, force-clean everything so the page
+  // never ends up with stray window-level listeners or timers.
+  useEffect(() => {
+    return () => {
+      draggingRef.current = false;
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      if (activeListenersRef.current) {
+        const { move, up } = activeListenersRef.current;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("touchmove", move);
+        window.removeEventListener("touchend", up);
+        activeListenersRef.current = null;
+      }
+    };
+  }, []);
 
   const categories = [
     { id: "work", label: "Work", icon: Briefcase, color: "#4D6FA8", bg: "#E9EEF6" },
@@ -473,6 +499,9 @@ function TodoView({ todos, saveTodos }) {
   };
 
   const beginDrag = (id) => {
+    // Guard: never start a second drag session while one is already active.
+    if (draggingRef.current) return;
+
     setDragId(id);
     setLocalOrder(sortedFiltered.map((t) => t.id));
     draggingRef.current = true;
@@ -503,6 +532,7 @@ function TodoView({ todos, saveTodos }) {
       window.removeEventListener("pointerup", handleUp);
       window.removeEventListener("touchmove", handleMove);
       window.removeEventListener("touchend", handleUp);
+      activeListenersRef.current = null;
       setLocalOrder((finalOrder) => {
         commitReorder(finalOrder);
         return finalOrder;
@@ -510,6 +540,7 @@ function TodoView({ todos, saveTodos }) {
       setDragId(null);
     };
 
+    activeListenersRef.current = { move: handleMove, up: handleUp };
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp);
     window.addEventListener("touchmove", handleMove, { passive: false });
