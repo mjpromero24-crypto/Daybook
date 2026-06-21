@@ -251,7 +251,7 @@ function Card({ children, className = "", bgImage = null }) {
           : { backgroundColor: "var(--card-bg)", color: "var(--card-text)" }
       }
     >
-      {bgImage && <div className="absolute inset-0 rounded-lg bg-white/55 pointer-events-none" />}
+      {bgImage && <div className="absolute inset-0 rounded-lg bg-white/75 pointer-events-none" />}
       <div className="relative">{children}</div>
     </div>
   );
@@ -374,7 +374,10 @@ function CalendarView({ events, saveEvents, bgImage }) {
         <div key={pickerView} className="animate-[fadein_0.2s_ease-out]">
           {pickerView === "days" && (
             <>
-              <div className="grid grid-cols-7 gap-1 text-center text-xs text-[#8A8071] mb-1">
+              <div
+                style={bgImage ? { textShadow: "0 0 6px rgba(255,255,255,0.9)" } : {}}
+                className={`grid grid-cols-7 gap-1 text-center text-xs mb-1 ${bgImage ? "text-[#2E2A24] font-medium" : "text-[#8A8071]"}`}
+              >
                 {dayNames.map((d, i) => <div key={i}>{d}</div>)}
               </div>
               <div className="grid grid-cols-7 gap-1">
@@ -389,7 +392,10 @@ function CalendarView({ events, saveEvents, bgImage }) {
                     <button
                       key={i}
                       onClick={() => setSelected(k)}
+                      style={bgImage ? { textShadow: "0 0 6px rgba(255,255,255,0.9)" } : {}}
                       className={`relative aspect-square rounded text-sm flex items-center justify-center transition-colors ${
+                        bgImage ? "font-semibold" : ""
+                      } ${
                         isSelected ? "bg-[var(--accent)] text-white" : isToday ? "bg-[#EDE6D6] font-semibold" : "hover:bg-[#EDE6D6]"
                       }`}
                     >
