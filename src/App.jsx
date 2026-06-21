@@ -1165,34 +1165,39 @@ function NotesView({ notes, saveNotes }) {
           {draftImages.map((img) => (
             <div
               key={img.id}
-              style={{
-                left: img.x,
-                top: img.y,
-                width: img.width,
-                height: img.height,
-                position: "absolute",
-                zIndex: img.front ? 10 : 1,
-              }}
-              className="group touch-none"
+              style={{ left: img.x, top: img.y, width: img.width, height: img.height, position: "absolute" }}
             >
+              {/* The photo itself respects front/back layering against the text */}
               <img
                 src={img.src}
                 alt=""
+                draggable={false}
+                style={{ zIndex: img.front ? 10 : 1, position: "relative" }}
+                className="w-full h-full object-cover rounded shadow-sm select-none no-select block"
+              />
+
+              {/* Controls always stay clickable on top, even when the photo is sent behind the text */}
+              <div
                 onPointerDown={(e) => startManipulate(e, img.id, "move")}
                 onTouchStart={(e) => startManipulate(e, img.id, "move")}
-                draggable={false}
-                className="w-full h-full object-cover rounded shadow-sm cursor-move select-none no-select block"
-              />
+                style={{ zIndex: 20 }}
+                className="absolute -top-2 -left-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow cursor-grab active:cursor-grabbing touch-none"
+                title="Drag to move"
+              >
+                <GripVertical size={12} />
+              </div>
               <button
                 onClick={() => removeImage(img.id)}
-                className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow opacity-100"
+                style={{ zIndex: 20 }}
+                className="absolute -top-2 -right-2 bg-[#2E2A24] text-white rounded-full p-0.5 shadow"
                 title="Remove photo"
               >
                 <X size={12} />
               </button>
               <button
                 onClick={() => setFront(img.id, !img.front)}
-                className="absolute -top-2 left-1/2 -translate-x-1/2 bg-[#2E2A24] text-white text-[9px] px-1.5 py-0.5 rounded-full shadow opacity-100 whitespace-nowrap"
+                style={{ zIndex: 20 }}
+                className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#2E2A24] text-white text-[9px] px-1.5 py-0.5 rounded-full shadow whitespace-nowrap"
                 title="Toggle front/back"
               >
                 {img.front ? "Send back" : "Bring front"}
@@ -1200,6 +1205,7 @@ function NotesView({ notes, saveNotes }) {
               <div
                 onPointerDown={(e) => startManipulate(e, img.id, "resize")}
                 onTouchStart={(e) => startManipulate(e, img.id, "resize")}
+                style={{ zIndex: 20 }}
                 className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-[var(--accent)] rounded-full cursor-nwse-resize border-2 border-white shadow touch-none"
                 title="Drag to resize"
               />
